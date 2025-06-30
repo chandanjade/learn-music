@@ -1,1 +1,1979 @@
-<h1>hello</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Piano Learning Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            touch-action: manipulation;
+            background-color: #f3f4f6; /* gray-100 */
+        }
+        .hidden { display: none; }
+        
+        .svg-text { fill: #1f2937; } /* gray-800 */
+        .svg-line { stroke: #1f2937; } /* gray-800 */
+
+        /* --- SHARED STYLES --- */
+        .scene { 
+            perspective: 1000px;
+            position: relative;
+        }
+        .card {
+            transform-style: preserve-3d;
+            transition: transform 0.6s;
+            cursor: pointer;
+        }
+        .card.is-flipped { transform: rotateY(180deg); }
+        .card-face {
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-color: #ffffff;
+            border: 1px solid #e5e7eb;
+        }
+        .card-face-back { transform: rotateY(180deg); }
+        
+        .peer:checked ~ .peer-checked\:bg-blue-600 { background-color: #2563eb; }
+        .peer:checked ~ .peer-checked\:translate-x-full { transform: translateX(100%); }
+        
+        .celebration {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            font-size: 5rem;
+            opacity: 0;
+            animation: pop-and-fade 1.5s ease-out forwards;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        @keyframes pop-and-fade {
+            0% { transform: translate(calc(-50% + var(--random-x)), calc(-50% + var(--random-y))) scale(0); opacity: 1; }
+            50% { transform: translate(calc(-50% + var(--random-x)), calc(-50% + var(--random-y))) scale(1.2); opacity: 1; }
+            100% { transform: translate(calc(-50% + var(--random-x)), calc(-50% + var(--random-y))) scale(1.5); opacity: 0; }
+        }
+
+        /* Card Stack & Fly-away Animations */
+        .card-stack-item {
+            position: absolute;
+            inset: 0;
+            background: white;
+            border-radius: 0.75rem; /* rounded-xl */
+            border: 1px solid #e5e7eb; /* border-gray-200 */
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        .card-stack-item-1 { transform: rotate(-3deg); z-index: -2; }
+        .card-stack-item-2 { transform: rotate(2deg) translateY(-3px); z-index: -1; }
+
+        @keyframes flyAwayCorrect { to { transform: translateY(-80px) translateX(250px) rotate(20deg); opacity: 0; } }
+        @keyframes flyAwayIncorrect { to { transform: translateY(-80px) translateX(-250px) rotate(-20deg); opacity: 0; } }
+        
+        .card-fly-away { animation-duration: 0.5s; animation-timing-function: ease-in; animation-fill-mode: forwards; }
+        .answered-correct { animation-name: flyAwayCorrect; }
+        .answered-incorrect { animation-name: flyAwayIncorrect; }
+        
+        /* --- PIANO SPECIFIC STYLES --- */
+        .piano { display: flex; position: relative; }
+        .key { border: 1px solid #333; box-sizing: border-box; border-bottom-left-radius: 5px; border-bottom-right-radius: 5px; transition: background-color 0.1s ease-in-out; position: relative; }
+        .white-key { background-color: white; width: calc(100% / 14); height: 160px; z-index: 1; }
+        .black-key { background-color: #333; width: calc((100% / 14) * 0.6); height: 100px; position: absolute; z-index: 2; margin-left: calc((100% / 14) * -0.3); border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
+        .black-key[data-key="2"] { left: calc((100% / 14) * 1); } .black-key[data-key="4"] { left: calc((100% / 14) * 2); } .black-key[data-key="7"] { left: calc((100% / 14) * 4); } .black-key[data-key="9"] { left: calc((100% / 14) * 5); } .black-key[data-key="11"] { left: calc((100% / 14) * 6); } .black-key[data-key="14"] { left: calc((100% / 14) * 8); } .black-key[data-key="16"] { left: calc((100% / 14) * 9); } .black-key[data-key="19"] { left: calc((100% / 14) * 11); } .black-key[data-key="21"] { left: calc((100% / 14) * 12); } .black-key[data-key="23"] { left: calc((100% / 14) * 13); }
+        .key.highlighted { background-color: #3b82f6; } /* Blue */
+        .key.correct { background-color: #16a34a; } /* Green */
+        .key.incorrect { background-color: #dc2626; } /* Red */
+        .black-key.highlighted { background-color: #60a5fa; }
+        .black-key.correct { background-color: #22c55e; }
+        .black-key.incorrect { background-color: #ef4444; }
+
+        #midi-status-indicator { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; background-color: #ef4444; transition: background-color 0.3s; }
+        #midi-status-indicator.connected { background-color: #22c55e; }
+
+        .btn-press { transition: transform 0.075s ease-out; }
+        .btn-press:active { transform: scale(0.97); }
+
+        #simulated-keyboard-container { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); width: 95%; max-width: 800px; background: rgba(200, 200, 210, 0.9); backdrop-filter: blur(5px); padding: 10px; padding-top: 20px; z-index: 100; box-shadow: 0 -5px 15px rgba(0,0,0,0.1); border: 1px solid #a0a0b0; border-radius: 10px; }
+        #keyboard-drag-handle { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); width: 80px; height: 8px; background-color: #a0a0b0; border-radius: 4px; cursor: grab; }
+        #simulated-keyboard { position: relative; height: 100px; margin: 0 auto; }
+        #simulated-keyboard .key { cursor: pointer; border-radius: 6px; border: 2px solid #555; position: absolute; }
+        #simulated-keyboard .white-key { height: 100%; background-color: #f8f9fa; z-index: 1; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px; font-size: 11px; font-weight: 600; color: #888; }
+        #simulated-keyboard .black-key { height: 65%; background-color: #343a40; z-index: 2; }
+        #simulated-keyboard .key:active { background-color: #facc15; }
+        #simulated-keyboard .key.played::after { content: ''; position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 10px; height: 10px; background-color: rgba(107, 114, 128, 0.9); border-radius: 50%; border: 1px solid white; box-shadow: 0 0 2px black; }
+        
+        .menu-card { background-color: white; border-radius: 0.75rem; padding: 1.5rem; text-align: center; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out; cursor: pointer; overflow: hidden; }
+        .menu-card:hover { transform: translateY(-5px); box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1), 0 0 20px rgba(129, 140, 248, 0.4); }
+        
+        .progress-bar-container { width: 50%; height: 40px; background-color: #d1d5db; border-radius: 9999px; cursor: pointer; position: relative; overflow: hidden; }
+        .progress-bar { height: 100%; background: linear-gradient(to right, #22c55e, #84cc16); border-radius: 9999px; transition: width 0.4s ease-in-out; }
+        .progress-text { position: absolute; inset: 0; text-align: center; color: white; font-size: 12px; font-weight: 600; line-height: 40px; text-shadow: 1px 1px 1px rgba(0,0,0,0.2); }
+        
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4 overflow-hidden">
+
+    <!-- Mode Selector -->
+    <div id="mode-selector" class="max-w-4xl w-full">
+        <header class="text-center mb-8 relative">
+            <h1 class="text-4xl md:text-5xl font-bold text-gray-800">Piano Learning Hub</h1>
+        </header>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
+            <div id="select-notes-mode" class="menu-card">
+                 <div class="h-32 flex items-center justify-center mb-4 text-teal-500 text-6xl">♪</div>
+                <h2 class="text-2xl font-bold text-gray-700">Learn Notes</h2>
+            </div>
+            <div id="select-chords-mode" class="menu-card">
+                <div class="h-32 flex items-center justify-center mb-4 text-blue-500 text-6xl">♫</div>
+                <h2 class="text-2xl font-bold text-gray-700">Learn Chords</h2>
+            </div>
+            <div id="select-scales-mode" class="menu-card">
+                 <div class="h-32 flex items-center justify-center mb-4 text-indigo-500 text-6xl">♬</div>
+                <h2 class="text-2xl font-bold text-gray-700">Learn Scales</h2>
+            </div>
+        </div>
+        
+        <div class="flex justify-center items-center mb-8">
+            <button id="connect-midi-btn" class="bg-green-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-green-700 btn-press">
+                Connect MIDI Device
+            </button>
+        </div>
+
+        <!-- Notation Guide -->
+        <div class="mt-12 text-center">
+            <button id="notation-guide-toggle" class="text-lg text-gray-700 hover:text-indigo-600 font-semibold btn-press">
+                First time reading music? Start here! &darr;
+            </button>
+            <div id="notation-guide-content" class="hidden mt-6 bg-white p-6 rounded-lg shadow-lg text-left max-w-3xl mx-auto transition-all duration-500">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">How to Read Music Notations</h2>
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="font-semibold text-lg mb-2">1. The Staff & Clefs</h3>
+                        <p class="text-gray-600">Music is written on a staff (5 lines, 4 spaces). The clef at the beginning tells you which notes the lines and spaces represent.</p>
+                        <div id="staff-guide" class="mt-2"></div>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-lg mb-2">2. Notes on the Staff</h3>
+                        <p class="text-gray-600">Each line and space represents a different note (A, B, C, D, E, F, G). The position depends on the clef.</p>
+                         <div id="notes-guide" class="mt-2"></div>
+                    </div>
+                     <div>
+                        <h3 class="font-semibold text-lg mb-2">3. Accidentals (Sharps & Flats)</h3>
+                        <p class="text-gray-600">Accidentals alter the pitch of a note. A <span class="font-bold">sharp (♯)</span> raises a note's pitch by a half step. A <span class="font-bold">flat (♭)</span> lowers a note's pitch by a half step.</p>
+                         <div id="accidentals-guide" class="mt-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+    </div>
+    
+    <!-- App Containers -->
+    <div id="app-container" class="w-full hidden">
+        <div class="absolute top-4 left-4 flex items-center gap-4">
+            <button class="back-to-menu-btn bg-gray-200 text-gray-700 py-2 px-4 rounded-full shadow-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 btn-press">
+                &larr; Back to Menu
+            </button>
+            <div id="midi-status" class="flex items-center text-sm font-semibold bg-white px-3 py-2 rounded-full shadow">
+                <span id="midi-status-indicator"></span>
+                <span id="midi-status-text" class="text-gray-800">MIDI Disconnected</span>
+            </div>
+        </div>
+        
+        <!-- Notes App Container -->
+        <div id="notes-app" class="hidden">
+             <div class="w-full max-w-md mx-auto relative pt-16">
+                <header class="text-center mb-4">
+                    <h1 class="text-3xl md:text-4xl font-bold text-gray-800">Note Recognition</h1>
+                    <p id="notes-status-message" class="text-gray-600 mt-1">Play the note you see.</p>
+                </header>
+                <div class="flex justify-between items-center gap-4 mb-6">
+                    <button id="notes-select-notes-btn" class="bg-indigo-500 text-white h-10 px-4 rounded-full shadow-md btn-press flex-shrink-0">Customize Deck</button>
+                    <div id="notes-progress-bar-container" class="progress-bar-container">
+                        <div id="notes-progress-bar" class="progress-bar" style="width: 0%;"></div>
+                        <span id="notes-progress-text" class="progress-text">0% Mastered</span>
+                    </div>
+                </div>
+                <div class="scene w-full h-80">
+                    <div class="card-stack-item card-stack-item-1"></div>
+                    <div class="card-stack-item card-stack-item-2"></div>
+                    <div id="notes-card" class="card w-full h-full relative">
+                        <div class="card-face card-face-front rounded-xl shadow-lg flex items-center justify-center border p-4">
+                            <div id="notes-notation-container" class="w-full h-full flex items-center justify-center"></div>
+                        </div>
+                        <div class="card-face card-face-back rounded-xl shadow-lg flex flex-col items-center justify-center p-4 border">
+                             <div id="notes-back-content" class="flex flex-col items-center justify-around h-full w-full">
+                                <div class="flex items-center gap-4">
+                                    <h2 id="notes-name" class="text-2xl md:text-3xl font-bold text-gray-800 text-center"></h2>
+                                    <button id="notes-play-sound-btn" class="text-gray-500 hover:text-blue-500 btn-press">
+                                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                                    </button>
+                                </div>
+                                <div id="notes-piano-container" class="w-full max-w-sm"></div>
+                                 <p class="text-gray-600 text-xs">A2 to C6</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="notes-animation-container" class="absolute inset-0 pointer-events-none"></div>
+                <div class="mt-6 flex flex-col justify-center min-h-[52px]">
+                    <div id="notes-feedback-buttons" class="flex gap-4 opacity-0 invisible transition-opacity duration-300">
+                        <button id="notes-incorrect-btn" class="w-full bg-red-500 text-white font-semibold py-3 px-6 rounded-lg shadow-md btn-press">Try Again</button>
+                        <button id="notes-correct-btn" class="w-full bg-green-500 text-white font-semibold py-3 px-6 rounded-lg shadow-md btn-press">I Knew It</button>
+                    </div>
+                </div>
+            </div>
+            <div id="notes-detailed-progress-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                 <div class="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+                    <div class="flex justify-between items-center p-4 border-b">
+                        <h3 class="text-xl font-bold text-gray-800">Detailed Progress</h3>
+                        <button id="notes-close-details-modal-btn" class="text-gray-500 text-3xl btn-press">&times;</button>
+                    </div>
+                    <div class="p-4 overflow-y-auto">
+                        <div id="notes-detailed-progress-list" class="border rounded-md p-2 max-h-[60vh] overflow-y-auto"></div>
+                    </div>
+                </div>
+            </div>
+             <div id="notes-selector-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+                    <div class="flex justify-between items-center p-4 border-b">
+                        <h3 class="text-xl font-bold">Customize Note Deck</h3>
+                        <button id="notes-close-selector-modal-btn" class="text-gray-500 text-3xl btn-press">&times;</button>
+                    </div>
+                    <div class="p-4 overflow-y-auto">
+                        <div class="space-y-4">
+                             <div>
+                                <h4 class="font-semibold mb-2">Clef</h4>
+                                <div id="notes-modal-clef-filters" class="flex flex-wrap gap-2">
+                                     <button data-type="treble" class="filter-btn clef-filter-btn text-sm py-1 px-3 rounded-full shadow btn-press">Treble Clef</button>
+                                     <button data-type="bass" class="filter-btn clef-filter-btn text-sm py-1 px-3 rounded-full shadow btn-press">Bass Clef</button>
+                                </div>
+                            </div>
+                            <div>
+                                 <div class="flex justify-between items-center mb-2">
+                                    <h4 class="font-semibold">Notes</h4>
+                                    <div class="flex gap-2">
+                                        <button id="notes-select-all-btn" class="text-xs bg-gray-200 px-2 py-1 rounded btn-press">All</button>
+                                        <button id="notes-deselect-all-btn" class="text-xs bg-gray-200 px-2 py-1 rounded btn-press">None</button>
+                                    </div>
+                                </div>
+                                <div id="notes-list-container" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 border p-2 rounded-md"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-4 border-t mt-auto">
+                         <button id="notes-save-selection-btn" class="w-full bg-indigo-500 text-white font-semibold py-3 rounded-lg btn-press">Done</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chords App Container -->
+        <div id="chords-app" class="hidden">
+             <div class="w-full max-w-md mx-auto relative pt-16">
+                <header class="text-center mb-4">
+                    <h1 class="text-3xl md:text-4xl font-bold text-gray-800">Chord Flashcards</h1>
+                    <p id="chords-status-message" class="text-gray-600 mt-1">Play the notes you see.</p>
+                </header>
+                 <div class="flex justify-between items-center gap-4 mb-6">
+                    <button id="chords-select-chords-btn" class="bg-indigo-500 text-white h-10 px-4 rounded-full shadow-md btn-press flex-shrink-0">Customize Deck</button>
+                     <div id="chords-progress-bar-container" class="progress-bar-container">
+                        <div id="chords-progress-bar" class="progress-bar" style="width: 0%;"></div>
+                        <span id="chords-progress-text" class="progress-text">0% Mastered</span>
+                    </div>
+                </div>
+                <div class="scene w-full h-80">
+                    <div class="card-stack-item card-stack-item-1"></div>
+                    <div class="card-stack-item card-stack-item-2"></div>
+                    <div id="chords-card" class="card w-full h-full relative">
+                        <div class="card-face card-face-front rounded-xl shadow-lg flex items-center justify-center border p-4">
+                            <div id="chords-notation-container" class="w-full h-full flex items-center justify-center"></div>
+                        </div>
+                        <div class="card-face card-face-back rounded-xl shadow-lg flex flex-col items-center justify-center p-4 border">
+                             <div id="chords-back-content" class="flex flex-col items-center justify-around h-full w-full">
+                                <div class="flex items-center gap-4">
+                                    <h2 id="chords-name" class="text-xl md:text-2xl font-bold text-gray-800 text-center"></h2>
+                                    <button id="chords-play-sound-btn" class="text-gray-500 hover:text-blue-500 btn-press">
+                                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                                    </button>
+                                </div>
+                                <div id="chords-mini-notation-container" class="w-full max-w-xs mx-auto -mt-4"></div>
+                                <div id="chords-piano-container" class="w-full max-w-sm"></div>
+                                 <p class="text-gray-600 text-xs">C4 to B5</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="chords-animation-container" class="absolute inset-0 pointer-events-none"></div>
+                <div class="mt-6 flex flex-col justify-center min-h-[52px]">
+                    <div id="chords-feedback-buttons" class="flex gap-4 opacity-0 invisible transition-opacity duration-300">
+                        <button id="chords-incorrect-btn" class="w-full bg-red-500 text-white font-semibold py-3 px-6 rounded-lg shadow-md btn-press">Try Again</button>
+                        <button id="chords-correct-btn" class="w-full bg-green-500 text-white font-semibold py-3 px-6 rounded-lg shadow-md btn-press">I Knew It</button>
+                    </div>
+                </div>
+            </div>
+            <div id="chords-detailed-progress-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+                    <div class="flex justify-between items-center p-4 border-b">
+                        <h3 class="text-xl font-bold text-gray-800">Detailed Progress</h3>
+                        <button id="chords-close-details-modal-btn" class="text-gray-500 text-3xl btn-press">&times;</button>
+                    </div>
+                    <div class="p-4 overflow-y-auto">
+                        <div id="chords-detailed-progress-list" class="border rounded-md p-2 max-h-[60vh] overflow-y-auto"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="chords-selector-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-lg shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col">
+                    <div class="flex justify-between items-center p-4 border-b">
+                        <h3 class="text-xl font-bold">Customize Deck</h3>
+                        <button id="chords-close-selector-modal-btn" class="text-gray-500 text-3xl btn-press">&times;</button>
+                    </div>
+                    <div class="p-4 overflow-y-auto">
+                        <div class="space-y-4">
+                            <div>
+                                <h4 class="font-semibold mb-2">Chord Type</h4>
+                                <div id="chords-modal-type-filters" class="flex flex-wrap gap-2"></div>
+                            </div>
+                             <div>
+                                <h4 class="font-semibold mb-2">Inversions</h4>
+                                <div id="chords-modal-inversion-filters" class="flex flex-wrap gap-2"></div>
+                            </div>
+                             <div>
+                                <h4 class="font-semibold mb-2">Mode</h4>
+                                <div class="flex items-center justify-center gap-4">
+                                    <div class="flex items-center justify-center gap-2">
+                                        <span class="text-sm font-medium">Block Chord</span>
+                                        <label for="chords-arpeggio-toggle" class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" id="chords-arpeggio-toggle" class="sr-only peer">
+                                            <div class="w-11 h-6 bg-gray-300 rounded-full peer peer-focus:ring-2 peer-focus:ring-blue-300 peer-checked:bg-blue-600"></div>
+                                            <div class="peer-checked:translate-x-full absolute top-[2px] left-[2px] bg-white border-gray-300 border rounded-full h-5 w-5 transition-all"></div>
+                                        </label>
+                                        <span class="text-sm font-medium">Arpeggio</span>
+                                    </div>
+                                    <div class="flex items-center justify-center gap-2">
+                                        <span class="text-sm font-medium">Accidentals</span>
+                                        <label for="chords-key-sig-toggle" class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" id="chords-key-sig-toggle" class="sr-only peer">
+                                            <div class="w-11 h-6 bg-gray-300 rounded-full peer peer-focus:ring-2 peer-focus:ring-blue-300 peer-checked:bg-blue-600"></div>
+                                            <div class="peer-checked:translate-x-full absolute top-[2px] left-[2px] bg-white border-gray-300 border rounded-full h-5 w-5 transition-all"></div>
+                                        </label>
+                                        <span class="text-sm font-medium">Key Signature</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                 <div class="flex justify-between items-center mb-2">
+                                    <h4 class="font-semibold">Chord Roots</h4>
+                                    <div class="flex gap-2">
+                                        <button id="chords-select-all-btn" class="text-xs bg-gray-200 px-2 py-1 rounded btn-press">All</button>
+                                        <button id="chords-deselect-all-btn" class="text-xs bg-gray-200 px-2 py-1 rounded btn-press">None</button>
+                                    </div>
+                                </div>
+                                <div id="chords-list-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 border p-2 rounded-md"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-4 border-t mt-auto">
+                         <button id="chords-save-selection-btn" class="w-full bg-indigo-500 text-white font-semibold py-3 rounded-lg btn-press">Done</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scales App Container -->
+        <div id="scales-app" class="hidden">
+             <div class="w-full max-w-xl mx-auto relative pt-16">
+                <header class="text-center mb-4">
+                    <h1 class="text-3xl md:text-4xl font-bold text-gray-800">Scale Flashcards</h1>
+                    <p id="scales-status-message" class="text-gray-600 mt-1">Play the notes you see.</p>
+                </header>
+                <div class="flex justify-between items-center gap-4 mb-6">
+                    <button id="scales-select-scales-btn" class="bg-indigo-500 text-white h-10 px-4 rounded-full shadow-md btn-press flex-shrink-0">Customize Deck</button>
+                     <div id="scales-progress-bar-container" class="progress-bar-container">
+                        <div id="scales-progress-bar" class="progress-bar" style="width: 0%;"></div>
+                        <span id="scales-progress-text" class="progress-text">0% Mastered</span>
+                    </div>
+                </div>
+                <div class="scene w-full h-80">
+                     <div class="card-stack-item card-stack-item-1"></div>
+                    <div class="card-stack-item card-stack-item-2"></div>
+                    <div id="scales-card" class="card w-full h-full relative">
+                        <div class="card-face card-face-front rounded-xl shadow-lg flex items-center justify-center border p-4">
+                            <div id="scales-notation-container" class="w-full h-full flex items-center justify-center"></div>
+                        </div>
+                        <div class="card-face card-face-back rounded-xl shadow-lg flex flex-col items-center justify-center p-4 border">
+                             <div class="flex flex-col items-center justify-around h-full w-full">
+                                <div class="flex items-center gap-4">
+                                    <h2 id="scales-name" class="text-xl md:text-2xl font-bold text-gray-800 text-center"></h2>
+                                    <button id="scales-play-sound-btn" class="text-gray-500 hover:text-blue-500 btn-press">
+                                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                                    </button>
+                                </div>
+                                <div id="scales-mini-notation-container" class="w-full max-w-md mx-auto -mt-4"></div>
+                                <div id="scales-piano-container" class="w-full max-w-lg"></div>
+                                 <p id="scales-piano-range" class="text-gray-600 text-xs"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="scales-animation-container" class="absolute inset-0 pointer-events-none"></div>
+                <div class="mt-6 flex flex-col justify-center min-h-[52px]">
+                    <div id="scales-feedback-buttons" class="flex gap-4 opacity-0 invisible transition-opacity duration-300">
+                        <button id="scales-incorrect-btn" class="w-full bg-red-500 text-white font-semibold py-3 rounded-lg shadow-md btn-press">Try Again</button>
+                        <button id="scales-correct-btn" class="w-full bg-green-500 text-white font-semibold py-3 px-6 rounded-lg shadow-md btn-press">I Knew It</button>
+                    </div>
+                </div>
+            </div>
+            <div id="scales-detailed-progress-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+                    <div class="flex justify-between items-center p-4 border-b">
+                        <h3 class="text-xl font-bold">Detailed Progress</h3>
+                        <button id="scales-close-details-modal-btn" class="text-gray-500 text-3xl btn-press">&times;</button>
+                    </div>
+                    <div class="p-4 overflow-y-auto">
+                        <div id="scales-detailed-progress-list" class="border rounded-md p-2 max-h-[60vh] overflow-y-auto"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="scales-selector-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-lg shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col">
+                    <div class="flex justify-between items-center p-4 border-b">
+                        <h3 class="text-xl font-bold">Customize Deck</h3>
+                        <button id="scales-close-selector-modal-btn" class="text-gray-500 text-3xl btn-press">&times;</button>
+                    </div>
+                    <div class="p-4 overflow-y-auto">
+                         <div class="space-y-4">
+                             <div>
+                                <h4 class="font-semibold mb-2">Scale Type</h4>
+                                <div id="scales-modal-type-filters" class="flex flex-wrap gap-2"></div>
+                            </div>
+                            <div>
+                                <h4 class="font-semibold mb-2">Mode</h4>
+                                <div class="flex items-center justify-center gap-2">
+                                    <span class="text-sm font-medium">Accidentals</span>
+                                    <label for="scales-key-sig-toggle" class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="scales-key-sig-toggle" class="sr-only peer">
+                                        <div class="w-11 h-6 bg-gray-300 rounded-full peer peer-checked:bg-blue-600"></div>
+                                        <div class="peer-checked:translate-x-full absolute top-[2px] left-[2px] bg-white border-gray-300 border rounded-full h-5 w-5 transition-all"></div>
+                                    </label>
+                                    <span class="text-sm font-medium">Key Signature</span>
+                                </div>
+                             </div>
+                             <div>
+                                 <div class="flex justify-between items-center mb-2">
+                                    <h4 class="font-semibold">Scale Roots</h4>
+                                    <div class="flex gap-2">
+                                        <button id="scales-select-all-btn" class="text-xs bg-gray-200 px-2 py-1 rounded btn-press">All</button>
+                                        <button id="scales-deselect-all-btn" class="text-xs bg-gray-200 px-2 py-1 rounded btn-press">None</button>
+                                    </div>
+                                </div>
+                                <div id="scales-list-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 border p-2 rounded-md"></div>
+                            </div>
+                         </div>
+                    </div>
+                    <div class="p-4 border-t mt-auto">
+                         <button id="scales-save-selection-btn" class="w-full bg-indigo-500 text-white font-semibold py-3 rounded-lg btn-press">Done</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- MIDI Device Selector Modal -->
+    <div id="midi-device-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-sm">
+            <div class="flex justify-between items-center p-4 border-b">
+                <h3 class="text-xl font-bold text-gray-800">Select MIDI Device</h3>
+                <button id="close-midi-modal-btn" class="text-gray-500 text-3xl leading-none hover:text-gray-800 btn-press">&times;</button>
+            </div>
+            <div id="midi-device-list" class="p-4 max-h-64 overflow-y-auto">
+                <!-- Device list will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- SIMULATED KEYBOARD -->
+    <div id="simulated-keyboard-container" class="hidden">
+        <div id="keyboard-drag-handle"></div>
+        <div id="simulated-keyboard">
+             <!-- Keys will be generated here -->
+        </div>
+    </div>
+
+    <script type="module">
+        // --- DATA and LOGIC ---
+
+        const NOTES_DATA = {
+            srsIntervals: [1, 2, 3],
+            notes: [
+                // Bass Clef Notes
+                { name: 'G2', key: -16, clef: 'bass', notation: { note: 'G', octave: 2 } },
+                { name: 'A2', key: -14, clef: 'bass', notation: { note: 'A', octave: 2 } },
+                { name: 'B2', key: -12, clef: 'bass', notation: { note: 'B', octave: 2 } },
+                { name: 'C3', key: -11, clef: 'bass', notation: { note: 'C', octave: 3 } },
+                { name: 'D3', key: -9, clef: 'bass', notation: { note: 'D', octave: 3 } },
+                { name: 'E3', key: -7, clef: 'bass', notation: { note: 'E', octave: 3 } },
+                { name: 'F3', key: -6, clef: 'bass', notation: { note: 'F', octave: 3 } },
+                { name: 'G3', key: -4, clef: 'bass', notation: { note: 'G', octave: 3 } },
+                { name: 'A3', key: -2, clef: 'bass', notation: { note: 'A', octave: 3 } },
+                { name: 'B3', key: 0, clef: 'bass', notation: { note: 'B', octave: 3 } },
+                // Treble Clef Notes (Middle C and up)
+                { name: 'C4', key: 1, clef: 'treble', notation: { note: 'C', octave: 4 } },
+                { name: 'D4', key: 3, clef: 'treble', notation: { note: 'D', octave: 4 } },
+                { name: 'E4', key: 5, clef: 'treble', notation: { note: 'E', octave: 4 } },
+                { name: 'F4', key: 6, clef: 'treble', notation: { note: 'F', octave: 4 } },
+                { name: 'G4', key: 8, clef: 'treble', notation: { note: 'G', octave: 4 } },
+                { name: 'A4', key: 10, clef: 'treble', notation: { note: 'A', octave: 4 } },
+                { name: 'B4', key: 12, clef: 'treble', notation: { note: 'B', octave: 4 } },
+                { name: 'C5', key: 13, clef: 'treble', notation: { note: 'C', octave: 5 } },
+                { name: 'D5', key: 15, clef: 'treble', notation: { note: 'D', octave: 5 } },
+                { name: 'E5', key: 17, clef: 'treble', notation: { note: 'E', octave: 5 } },
+                { name: 'F5', key: 18, clef: 'treble', notation: { note: 'F', octave: 5 } },
+            ].map(n => ({...n, id: `${n.name}-${n.clef}`, keys: [n.key]}))
+        };
+
+        // CHORDS DATA
+        const CHORDS_DATA = {
+            srsIntervals: [1, 2, 3],
+            baseChords: [
+                { name: 'C Major', type: 'major', keys: [1, 5, 8], notation: [{note: 'C', octave: 4}, {note: 'E', octave: 4}, {note: 'G', octave: 4}]},
+                { name: 'G Major', type: 'major', keys: [8, 12, 15], notation: [{note: 'G', octave: 4}, {note: 'B', octave: 4}, {note: 'D', octave: 5}]},
+                { name: 'D Major', type: 'major', keys: [3, 7, 10], notation: [{note: 'D', octave: 4}, {note: 'F', octave: 4, acc: '#'}, {note: 'A', octave: 4}]},
+                { name: 'A Major', type: 'major', keys: [10, 14, 17], notation: [{note: 'A', octave: 4}, {note: 'C', octave: 5, acc: '#'}, {note: 'E', octave: 5}]},
+                { name: 'E Major', type: 'major', keys: [5, 9, 12], notation: [{note: 'E', octave: 4}, {note: 'G', octave: 4, acc: '#'}, {note: 'B', octave: 4}]},
+                { name: 'B Major', type: 'major', keys: [12, 16, 19], notation: [{note: 'B', octave: 4}, {note: 'D', octave: 5, acc: '#'}, {note: 'F', octave: 5, acc: '#'}]},
+                { name: 'F Major', type: 'major', keys: [6, 10, 13], notation: [{note: 'F', octave: 4}, {note: 'A', octave: 4}, {note: 'C', octave: 5}]},
+                { name: 'Bb Major', type: 'major', keys: [11, 15, 18], notation: [{note: 'B', octave: 4, acc: 'b'}, {note: 'D', octave: 5}, {note: 'F', octave: 5}]},
+                { name: 'Eb Major', type: 'major', keys: [4, 8, 11], notation: [{note: 'E', octave: 4, acc: 'b'}, {note: 'G', octave: 4}, {note: 'B', octave: 4, acc: 'b'}]},
+                { name: 'Ab Major', type: 'major', keys: [9, 13, 16], notation: [{note: 'A', octave: 4, acc: 'b'}, {note: 'C', octave: 5}, {note: 'E', octave: 5, acc: 'b'}]},
+                { name: 'Db Major', type: 'major', keys: [2, 6, 9], notation: [{note: 'D', octave: 4, acc: 'b'}, {note: 'F', octave: 4}, {note: 'A', octave: 4, acc: 'b'}]},
+                { name: 'Gb Major', type: 'major', keys: [7, 11, 14], notation: [{note: 'G', octave: 4, acc: 'b'}, {note: 'B', octave: 4, acc: 'b'}, {note: 'D', octave: 5, acc: 'b'}]},
+                { name: 'A Minor', type: 'minor', keys: [10, 13, 17], notation: [{note: 'A', octave: 4}, {note: 'C', octave: 5}, {note: 'E', octave: 5}]},
+                { name: 'E Minor', type: 'minor', keys: [5, 8, 12], notation: [{note: 'E', octave: 4}, {note: 'G', octave: 4}, {note: 'B', octave: 4}]},
+                { name: 'B Minor', type: 'minor', keys: [12, 15, 19], notation: [{note: 'B', octave: 4}, {note: 'D', octave: 5}, {note: 'F', octave: 5, acc: '#'}]},
+                { name: 'F# Minor', type: 'minor', keys: [7, 10, 14], notation: [{note: 'F', octave: 4, acc: '#'}, {note: 'A', octave: 4}, {note: 'C', octave: 5, acc: '#'}]},
+                { name: 'C# Minor', type: 'minor', keys: [2, 5, 9], notation: [{note: 'C', octave: 4, acc: '#'}, {note: 'E', octave: 4}, {note: 'G', octave: 4, acc: '#'}]},
+                { name: 'D Minor', type: 'minor', keys: [3, 6, 10], notation: [{note: 'D', octave: 4}, {note: 'F', octave: 4}, {note: 'A', octave: 4}]},
+                { name: 'G Minor', type: 'minor', keys: [8, 11, 15], notation: [{note: 'G', octave: 4}, {note: 'B', octave: 4, acc: 'b'}, {note: 'D', octave: 5}]},
+                { name: 'C Minor', type: 'minor', keys: [1, 4, 8], notation: [{note: 'C', octave: 4}, {note: 'E', octave: 4, acc: 'b'}, {note: 'G', octave: 4}]},
+                { name: 'F Minor', type: 'minor', keys: [6, 9, 13], notation: [{note: 'F', octave: 4}, {note: 'A', octave: 4, acc: 'b'}, {note: 'C', octave: 5}]},
+                { name: 'Bb Minor', type: 'minor', keys: [11, 14, 18], notation: [{note: 'B', octave: 4, acc: 'b'}, {note: 'D', octave: 5, acc: 'b'}, {note: 'F', octave: 5}]},
+                { name: 'Eb Minor', type: 'minor', keys: [4, 7, 11], notation: [{note: 'E', octave: 4, acc: 'b'}, {note: 'G', octave: 4, acc: 'b'}, {note: 'B', octave: 4, acc: 'b'}]}
+            ],
+            KEY_SIGNATURES: {
+                'C Major': { type: 'natural', count: 0, notes: [] }, 'A Minor': { type: 'natural', count: 0, notes: [] },
+                'G Major': { type: '#', count: 1, notes: ['F'] }, 'E Minor': { type: '#', count: 1, notes: ['F'] },
+                'D Major': { type: '#', count: 2, notes: ['F', 'C'] }, 'B Minor': { type: '#', count: 2, notes: ['F', 'C'] },
+                'A Major': { type: '#', count: 3, notes: ['F', 'C', 'G'] }, 'F# Minor': { type: '#', count: 3, notes: ['F', 'C', 'G'] },
+                'E Major': { type: '#', count: 4, notes: ['F', 'C', 'G', 'D'] }, 'C# Minor': { type: '#', count: 4, notes: ['F', 'C', 'G', 'D'] },
+                'B Major': { type: '#', count: 5, notes: ['F', 'C', 'G', 'D', 'A'] }, 'G# Minor': { type: '#', count: 5, notes: ['F', 'C', 'G', 'D', 'A'] },
+                'F# Major': { type: '#', count: 6, notes: ['F', 'C', 'G', 'D', 'A', 'E'] }, 'D# Minor': { type: '#', count: 6, notes: ['F', 'C', 'G', 'D', 'A', 'E'] },
+                'F Major': { type: 'b', count: 1, notes: ['B'] }, 'D Minor': { type: 'b', count: 1, notes: ['B'] },
+                'Bb Major': { type: 'b', count: 2, notes: ['B', 'E'] }, 'G Minor': { type: 'b', count: 2, notes: ['B', 'E'] },
+                'Eb Major': { type: 'b', count: 3, notes: ['B', 'E', 'A'] }, 'C Minor': { type: 'b', count: 3, notes: ['B', 'E', 'A'] },
+                'Ab Major': { type: 'b', count: 4, notes: ['B', 'E', 'A', 'D'] }, 'F Minor': { type: 'b', count: 4, notes: ['B', 'E', 'A', 'D'] },
+                'Db Major': { type: 'b', count: 5, notes: ['B', 'E', 'A', 'D', 'G'] }, 'Bb Minor': { type: 'b', count: 5, notes: ['B', 'E', 'A', 'D', 'G'] },
+                'Gb Major': { type: 'b', count: 6, notes: ['B', 'E', 'A', 'D', 'G', 'C'] }, 'Eb Minor': { type: 'b', count: 6, notes: ['B', 'E', 'A', 'D', 'G', 'C'] },
+            }
+        };
+        
+        function generateAllChords(baseChords) {
+            const allInversions = [];
+            const MAX_KEY = 24;
+            baseChords.forEach(chord => {
+                const baseName = chord.name;
+                allInversions.push({ ...chord, baseName: baseName, name: `${baseName} (Root)`, id: `${baseName}-root`, inversionType: 'root' });
+                const firstInv = {
+                    ...chord, baseName: baseName, name: `${baseName} (1st Inv)`, id: `${baseName}-1st`, inversionType: '1st',
+                    keys: [chord.keys[1], chord.keys[2], chord.keys[0] + 12],
+                    notation: [chord.notation[1], chord.notation[2], { ...chord.notation[0], octave: chord.notation[0].octave + 1 }]
+                };
+                if (firstInv.keys.every(k => k <= MAX_KEY)) allInversions.push(firstInv);
+                const secondInv = {
+                    ...chord, baseName: baseName, name: `${baseName} (2nd Inv)`, id: `${baseName}-2nd`, inversionType: '2nd',
+                    keys: [firstInv.keys[1], firstInv.keys[2], firstInv.keys[0] + 12],
+                    notation: [firstInv.notation[1], firstInv.notation[2], { ...firstInv.notation[0], octave: firstInv.notation[0].octave + 1 }]
+                };
+                if (secondInv.keys.every(k => k <= MAX_KEY)) allInversions.push(secondInv);
+            });
+            return allInversions;
+        }
+
+        // SCALES DATA (Full data for scales)
+        const SCALES_DATA = {
+            baseScales: [
+                { name: "C Major", type: "major", keys: [1, 3, 5, 6, 8, 10, 12, 13], notation: "C4,D4,E4,F4,G4,A4,B4,C5" },
+                { name: "G Major", type: "major", keys: [8, 10, 12, 13, 15, 17, 19, 20], notation: "G4,A4,B4,C5,D5,E5,F#5,G5" },
+                { name: "D Major", type: "major", keys: [3, 5, 7, 8, 10, 12, 14, 15], notation: "D4,E4,F#4,G4,A4,B4,C#5,D5" },
+                { name: "A Major", type: "major", keys: [10, 12, 14, 15, 17, 19, 21, 22], notation: "A4,B4,C#5,D5,E5,F#5,G#5,A5" },
+                { name: "E Major", type: "major", keys: [5, 7, 9, 10, 12, 14, 16, 17], notation: "E4,F#4,G#4,A4,B4,C#5,D#5,E5" },
+                { name: "B Major", type: "major", keys: [12, 14, 16, 17, 19, 21, 23, 24], notation: "B4,C#5,D#5,E5,F#5,G#5,A#5,B5" },
+                { name: "F# Major", type: "major", keys: [7, 9, 11, 12, 14, 16, 18, 19], notation: "F#4,G#4,A#4,B4,C#5,D#5,E#5,F#5" },
+                { name: "F Major", type: "major", keys: [6, 8, 10, 11, 13, 15, 17, 18], notation: "F4,G4,A4,Bb4,C5,D5,E5,F5" },
+                { name: "Bb Major", type: "major", keys: [11, 13, 15, 16, 18, 20, 22, 23], notation: "Bb4,C5,D5,Eb5,F5,G5,A5,Bb5" },
+                { name: "Eb Major", type: "major", keys: [4, 6, 8, 9, 11, 13, 15, 16], notation: "Eb4,F4,G4,Ab4,Bb4,C5,D5,Eb5" },
+                { name: "Ab Major", type: "major", keys: [9, 11, 13, 14, 16, 18, 20, 21], notation: "Ab4,Bb4,C5,Db5,Eb5,F5,G5,Ab5" },
+                { name: "Db Major", type: "major", keys: [2, 4, 6, 7, 9, 11, 13, 14], notation: "Db4,Eb4,F4,Gb4,Ab4,Bb4,C5,Db5" },
+                { name: "Gb Major", type: "major", keys: [7, 9, 11, 12, 14, 16, 18, 19], notation: "Gb4,Ab4,Bb4,Cb5,Db5,Eb5,F5,Gb5" },
+                
+                { name: "A Minor", type: "naturalMinor", keys: [10, 12, 13, 15, 17, 18, 20, 22], notation: "A4,B4,C5,D5,E5,F5,G5,A5" },
+                { name: "E Minor", type: "naturalMinor", keys: [5, 7, 8, 10, 12, 13, 15, 17], notation: "E4,F#4,G4,A4,B4,C5,D5,E5" },
+                { name: "B Minor", type: "naturalMinor", keys: [12, 14, 15, 17, 19, 20, 22, 24], notation: "B4,C#5,D5,E5,F#5,G5,A5,B5" },
+                { name: "F# Minor", type: "naturalMinor", keys: [7, 9, 10, 12, 14, 15, 17, 19], notation: "F#4,G#4,A4,B4,C#5,D5,E5,F#5" },
+                { name: "C# Minor", type: "naturalMinor", keys: [2, 4, 5, 7, 9, 10, 12, 14], notation: "C#4,D#4,E4,F#4,G#4,A4,B4,C#5" },
+                { name: "G# Minor", type: "naturalMinor", keys: [9, 11, 12, 14, 16, 17, 19, 21], notation: "G#4,A#4,B4,C#5,D#5,E5,F#5,G#5" },
+                { name: "D Minor", type: "naturalMinor", keys: [3, 5, 6, 8, 10, 11, 13, 15], notation: "D4,E4,F4,G4,A4,Bb4,C5,D5" },
+                { name: "G Minor", type: "naturalMinor", keys: [8, 10, 11, 13, 15, 16, 18, 20], notation: "G4,A4,Bb4,C5,D5,Eb5,F5,G5" },
+                { name: "C Minor", type: "naturalMinor", keys: [1, 3, 4, 6, 8, 9, 11, 13], notation: "C4,D4,Eb4,F4,G4,Ab4,Bb4,C5" },
+                { name: "F Minor", type: "naturalMinor", keys: [6, 8, 9, 11, 13, 14, 16, 18], notation: "F4,G4,Ab4,Bb4,C5,Db5,Eb5,F5" },
+                { name: "Bb Minor", type: "naturalMinor", keys: [11, 13, 14, 16, 18, 19, 21, 23], notation: "Bb4,C5,Db5,Eb5,F5,Gb5,Ab5,Bb5" },
+                { name: "Eb Minor", type: "naturalMinor", keys: [4, 6, 7, 9, 11, 12, 14, 16], notation: "Eb4,F4,Gb4,Ab4,Bb4,Cb5,Db5,Eb5" },
+                
+                { name: "A Minor", type: "harmonicMinor", keys: [10, 12, 13, 15, 17, 18, 21, 22], notation: "A4,B4,C5,D5,E5,F5,G#5,A5" },
+                { name: "E Minor", type: "harmonicMinor", keys: [5, 7, 8, 10, 12, 13, 16, 17], notation: "E4,F#4,G4,A4,B4,C5,D#5,E5" },
+                { name: "B Minor", type: "harmonicMinor", keys: [12, 14, 15, 17, 19, 20, 23, 24], notation: "B4,C#5,D5,E5,F#5,G5,A#5,B5" },
+                { name: "F# Minor", type: "harmonicMinor", keys: [7, 9, 10, 12, 14, 15, 18, 19], notation: "F#4,G#4,A4,B4,C#5,D5,E#5,F#5" },
+                { name: "C# Minor", type: "harmonicMinor", keys: [2, 4, 5, 7, 9, 10, 13, 14], notation: "C#4,D#4,E4,F#4,G#4,A4,B#4,C#5" },
+                
+                { name: "A Minor", type: "melodicMinor", keys: [10, 12, 13, 15, 17, 19, 21, 22], notation: "A4,B4,C5,D5,E5,F#5,G#5,A5" },
+                { name: "E Minor", type: "melodicMinor", keys: [5, 7, 8, 10, 12, 14, 16, 17], notation: "E4,F#4,G4,A4,B4,C#5,D#5,E5" },
+                { name: "B Minor", type: "melodicMinor", keys: [12, 14, 15, 17, 19, 21, 23, 24], notation: "B4,C#5,D5,E5,F#5,G#5,A#5,B5" },
+                { name: "F# Minor", type: "melodicMinor", keys: [7, 9, 10, 12, 14, 16, 18, 19], notation: "F#4,G#4,A4,B4,C#5,D#5,E#5,F#5" },
+                { name: "C# Minor", type: "melodicMinor", keys: [2, 4, 5, 7, 9, 11, 13, 14], notation: "C#4,D#4,E4,F#4,G#4,A#4,B#4,C#5" },
+            ],
+            KEY_SIGNATURES: CHORDS_DATA.KEY_SIGNATURES // Reuse from chords
+        };
+
+        function parseNotationString(str) {
+            return str.split(',').map(n => {
+                const match = n.match(/([A-G])([#b]?)([0-9])/);
+                if (!match) { // Handle special cases like E# and B#
+                    if (n.startsWith('E#')) return { note: 'F', acc: null, octave: parseInt(n.slice(-1)) };
+                    if (n.startsWith('B#')) return { note: 'C', acc: null, octave: parseInt(n.slice(-1)) + 1 };
+                    return null;
+                }
+                return { note: match[1], acc: match[2] || null, octave: parseInt(match[3]) };
+            }).filter(Boolean);
+        }
+        
+        function generateScaleKeySignature(scale) {
+            const name = scale.name.replace(/ Natural| Harmonic| Melodic/g, '');
+            return SCALES_DATA.KEY_SIGNATURES[name] || { type: 'natural', count: 0, notes: [] };
+        }
+        
+        function parseAllScales(baseScales) {
+            return baseScales.map(s => ({ ...s, id: s.name.replace(/\s/g, '-'), notation: parseNotationString(s.notation), keySignature: generateScaleKeySignature(s) }));
+        }
+        
+        // --- AUDIO Controller ---
+        const Audio = {
+            synth: null,
+            isInitialized: false,
+            init() {
+                if (this.isInitialized || typeof Tone === 'undefined') return;
+                this.synth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: 'sine' },
+                    envelope: { attack: 0.005, decay: 0.1, sustain: 0.3, release: 1 }
+                }).toDestination();
+                this.isInitialized = true;
+            },
+            async start() {
+                if (typeof Tone !== 'undefined' && Tone.context.state !== 'running') {
+                    await Tone.start();
+                }
+                this.init();
+            },
+            keyToNote(key) {
+                const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+                const octave = Math.floor((key - 1) / 12) + 4;
+                const noteIndex = (((key - 1) % 12) + 12) % 12;
+                return noteNames[noteIndex] + octave;
+            },
+            playNotes(keys, isArpeggio = false) {
+                if (!this.isInitialized || !keys || keys.length === 0) return;
+                const notes = keys.map(k => this.keyToNote(k));
+                const now = Tone.now();
+                if (isArpeggio) {
+                    notes.forEach((note, i) => {
+                        this.synth.triggerAttackRelease(note, '8n', now + i * 0.15);
+                    });
+                } else {
+                    this.synth.triggerAttackRelease(notes, '1n', now);
+                }
+            }
+        };
+
+
+        // --- MIDI Controller ---
+        const MIDI = {
+            midiAccess: null,
+            pressedKeys: new Set(),
+            playedKeysSinceFlip: new Set(),
+            isReady: false,
+            init() {
+                if (navigator.requestMIDIAccess) {
+                    navigator.requestMIDIAccess()
+                        .then(access => {
+                            this.midiAccess = access;
+                            this.midiAccess.onstatechange = this.populateDeviceList.bind(this);
+                            this.populateDeviceList();
+                            document.getElementById('midi-device-modal').classList.remove('hidden');
+                        })
+                        .catch(() => {
+                            alert('Could not access your MIDI devices. Please ensure you have granted permission.');
+                        });
+                } else {
+                    alert('Web MIDI not supported in this browser.');
+                }
+            },
+            populateDeviceList() {
+                const listEl = document.getElementById('midi-device-list');
+                listEl.innerHTML = '';
+                if (this.midiAccess && this.midiAccess.inputs.size > 0) {
+                    this.midiAccess.inputs.forEach(input => {
+                        const btn = document.createElement('button');
+                        btn.className = 'block w-full text-left p-3 hover:bg-gray-100 rounded-md transition-colors btn-press';
+                        btn.textContent = input.name;
+                        btn.dataset.id = input.id;
+                        listEl.appendChild(btn);
+                    });
+                } else {
+                    listEl.innerHTML = '<p class="text-gray-500 p-3">No MIDI input devices found.</p>';
+                }
+            },
+            connectToDevice(inputId) {
+                const input = this.midiAccess.inputs.get(inputId);
+                if (!input) return;
+
+                this.midiAccess.inputs.forEach(i => i.onmidimessage = null);
+
+                input.onmidimessage = this.onMIDIMessage.bind(this);
+                this.isReady = true;
+                
+                document.getElementById('midi-status-indicator').classList.add('connected');
+                document.getElementById('midi-status-text').textContent = `Connected: ${input.name}`;
+                document.getElementById('simulated-keyboard-container').classList.add('hidden');
+                document.getElementById('midi-device-modal').classList.add('hidden');
+            },
+            midiNoteToKey(note) { return note - 59; },
+            onMIDIMessage(event) {
+                const command = event.data[0];
+                const note = event.data[1];
+                const velocity = (event.data.length > 2) ? event.data[2] : 0;
+                const keyNumber = this.midiNoteToKey(note);
+
+                const activeApp = !notesAppContainer.classList.contains('hidden') ? window.notesAppInstance 
+                                : !chordsAppContainer.classList.contains('hidden') ? window.chordsAppInstance 
+                                : !scalesAppContainer.classList.contains('hidden') ? window.scalesAppInstance
+                                : null;
+                
+                if (activeApp && activeApp.isWaitingForNext() && command === 144 && velocity > 0) {
+                    activeApp.handleMidiContinue();
+                    return;
+                }
+
+                if (!activeApp || !activeApp.isReadyForMidi() || activeApp.isCardFlipped()) return;
+
+                if (command === 144 && velocity > 0) { // Note On
+                    this.playedKeysSinceFlip.add(keyNumber);
+
+                    const currentItem = activeApp.getCurrentItem();
+                    if (currentItem) {
+                        const requiredKeyCount = currentItem.keys.length;
+                        if (this.playedKeysSinceFlip.size >= requiredKeyCount) {
+                            if (!activeApp.isCardFlipped()) activeApp.flipCard({ isMidiTriggered: true });
+                            setTimeout(() => activeApp.checkMidiAnswer(Array.from(this.playedKeysSinceFlip)), 100);
+                        }
+                    }
+                }
+            },
+        };
+
+        // --- Main Hub Logic ---
+        const modeSelector = document.getElementById('mode-selector');
+        const appContainer = document.getElementById('app-container');
+        const connectMidiBtn = document.getElementById('connect-midi-btn');
+        const midiDeviceModal = document.getElementById('midi-device-modal');
+        const closeMidiModalBtn = document.getElementById('close-midi-modal-btn');
+        const midiDeviceList = document.getElementById('midi-device-list');
+        const selectNotesModeBtn = document.getElementById('select-notes-mode');
+        const selectChordsModeBtn = document.getElementById('select-chords-mode');
+        const selectScalesModeBtn = document.getElementById('select-scales-mode');
+        const notesAppContainer = document.getElementById('notes-app');
+        const chordsAppContainer = document.getElementById('chords-app');
+        const scalesAppContainer = document.getElementById('scales-app');
+        const notationGuideToggle = document.getElementById('notation-guide-toggle');
+        const notationGuideContent = document.getElementById('notation-guide-content');
+        const simKeyboardContainer = document.getElementById('simulated-keyboard-container');
+        
+        let isNotesInitialized = false;
+        let isChordsInitialized = false;
+        let isScalesInitialized = false;
+
+        function showApp(appName) {
+            modeSelector.classList.add('hidden');
+            appContainer.classList.remove('hidden');
+            if (!MIDI.isReady) simKeyboardContainer.classList.remove('hidden');
+            
+            [notesAppContainer, chordsAppContainer, scalesAppContainer].forEach(app => app.classList.add('hidden'));
+
+            if (appName === 'notes') {
+                notesAppContainer.classList.remove('hidden');
+                if (!isNotesInitialized) { window.notesAppInstance = initNotesApp(); isNotesInitialized = true; }
+            } else if (appName === 'chords') {
+                chordsAppContainer.classList.remove('hidden');
+                if (!isChordsInitialized) { window.chordsAppInstance = initChordsApp(); isChordsInitialized = true; }
+            } else if (appName === 'scales') {
+                scalesAppContainer.classList.remove('hidden');
+                if (!isScalesInitialized) { window.scalesAppInstance = initScalesApp(); isScalesInitialized = true; }
+            }
+        }
+        function showMenu() {
+            appContainer.classList.add('hidden');
+            simKeyboardContainer.classList.add('hidden');
+            modeSelector.classList.remove('hidden');
+        }
+
+        selectNotesModeBtn.addEventListener('click', () => showApp('notes'));
+        selectChordsModeBtn.addEventListener('click', () => showApp('chords'));
+        selectScalesModeBtn.addEventListener('click', () => showApp('scales'));
+        connectMidiBtn.addEventListener('click', () => MIDI.init());
+        closeMidiModalBtn.addEventListener('click', () => midiDeviceModal.classList.add('hidden'));
+        midiDeviceList.addEventListener('click', (e) => {
+            const button = e.target.closest('button');
+            if (button && button.dataset.id) MIDI.connectToDevice(button.dataset.id);
+        });
+        document.querySelectorAll('.back-to-menu-btn').forEach(btn => btn.addEventListener('click', showMenu));
+        
+        notationGuideToggle.addEventListener('click', () => {
+            const isHidden = notationGuideContent.classList.contains('hidden');
+            notationGuideToggle.innerHTML = `First time reading music? Start here! ${isHidden ? '&uarr;' : '&darr;'}`;
+            if(isHidden) drawNotationGuides();
+            notationGuideContent.classList.toggle('hidden');
+        });
+        function drawNotationGuides() {
+            document.getElementById('staff-guide').innerHTML = `<svg width="100%" height="150" viewbox="0 0 400 150" class="notation-guide-svg"><text x="10" y="55" font-size="70" font-family="serif" class="svg-text">&amp;</text><g>${[...Array(5)].map((_,i) => `<line x1="80" y1="${20+i*20}" x2="180" y2="${20+i*20}" class="svg-line" stroke-width="2"/>`).join('')}</g><text x="90" y="130" text-anchor="middle" class="svg-text">Treble Clef</text><path d="M220 40 C 240 20, 260 60, 240 80 S 220 100, 220 120" class="svg-line" stroke-width="4" fill="none" /><circle cx="212" cy="70" r="5" class="svg-line"/><circle cx="268" cy="70" r="5" class="svg-line"/><g>${[...Array(5)].map((_,i) => `<line x1="280" y1="${20+i*20}" x2="380" y2="${20+i*20}" class="svg-line" stroke-width="2"/>`).join('')}</g><text x="330" y="130" text-anchor="middle" class="svg-text">Bass Clef</text></svg>`;
+            document.getElementById('notes-guide').innerHTML = `<svg width="100%" height="150" viewbox="0 0 400 150" class="notation-guide-svg">${[...Array(5)].map((_,i)=>`<line x1="10" y1="${20+i*20}" x2="390" y2="${20+i*20}" stroke="#D1D5DB" stroke-width="1"/><ellipse cx="100" cy="${20+i*20}" rx="9" ry="7" fill="black"/><text x="120" y="${26+i*20}" class="svg-text">${['F','D','B','G','E'][i]}</text>${i<4?`<ellipse cx="250" cy="${30+i*20}" rx="9" ry="7" fill="black"/><text x="270" y="${36+i*20}" class="svg-text">${['E','C','A','F'][i]}</text>`:''}`).join('')}<text x="80" y="135" class="svg-text">Treble Lines (E G B D F)</text><text x="230" y="135" class="svg-text">Treble Spaces (F A C E)</text></svg>`;
+            document.getElementById('accidentals-guide').innerHTML = `<svg width="100%" height="60" viewbox="0 0 400 60" class="notation-guide-svg"><text x="50" y="35" font-size="30" font-family="serif" class="svg-text">♯</text><text x="80" y="32" class="svg-text">Sharp (Raises pitch)</text><text x="250" y="35" font-size="30" font-family="serif" class="svg-text">♭</text><text x="280" y="32" class="svg-text">Flat (Lowers pitch)</text></svg>`;
+        }
+        
+        /**
+         * Generic Notation SVG Renderer
+         */
+        function drawNotationSVG(container, notes, options) {
+            const { clef = 'treble', signature = null, isArpeggio = false, width, height, staffY, staffSpacing, noteSpacing = 25, startX = 85 } = options;
+            
+            const pitchValueMap = { 'C': 0, 'D': 1, 'E': 2, 'F': 3, 'G': 4, 'A': 5, 'B': 6 };
+            const getAbsPitch = (note) => note.octave * 7 + pitchValueMap[note.note];
+
+            const trebleRef = { note: 'B', octave: 4 };
+            const bassRef = { note: 'D', octave: 3 }; 
+            const trebleRefPitch = getAbsPitch(trebleRef);
+            const bassRefPitch = getAbsPitch(bassRef);
+
+            let svg = `<svg width="100%" height="${height}" viewbox="0 0 ${width} ${height}">`;
+            
+            // Draw clef symbol
+            if (clef === 'treble') {
+                svg += `<text x="10" y="${staffY + staffSpacing * 3 + 6}" font-size="${staffSpacing * 5}" font-family='serif' class="svg-text">&amp;</text>`;
+            } else { // Bass clef
+                 svg += `<path d="M15 ${staffY} C 35 ${staffY-20}, 55 ${staffY+40}, 35 ${staffY+60} S 15 ${staffY+80}, 15 ${staffY+100}" class="svg-line" stroke-width="4" fill="none" /><circle cx="7" cy="${staffY + staffSpacing}" r="4" class="svg-line"/><circle cx="53" cy="${staffY + staffSpacing}" r="4" class="svg-line"/>`;
+            }
+
+            // Draw staff lines
+            for (let i = 0; i < 5; i++) svg += `<line x1="10" y1="${staffY + i * staffSpacing}" x2="${width - 10}" y2="${staffY + i * staffSpacing}" class="svg-line"/>`;
+
+            let sigWidth = clef === 'treble' ? 45 : 65; // Starting x for notes after clef
+            if (signature && signature.count > 0) {
+                 const sharpPos = [0, 1.5, -0.5, 1, 2.5, 0.5, 2], flatPos = [2, 0.5, 2.5, 1, 3, 1.5, 3.5];
+                 const positions = signature.type === '#' ? sharpPos : flatPos; let x = sigWidth;
+                 for (let i = 0; i < signature.count; i++) {
+                    svg += `<text x="${x}" y="${staffY + positions[i] * staffSpacing + 6}" font-size="${staffSpacing * 2}" font-family="serif" class="svg-text">${signature.type === '#' ? '♯' : '♭'}</text>`;
+                    x += staffSpacing;
+                }
+                sigWidth = x + 10;
+            }
+
+            const pitchMap = { 'C':0, 'D':2, 'E':4, 'F':5, 'G':7, 'A':9, 'B':11 };
+            const sortedNotes = [...notes].sort((a,b) => (a.octave*12+pitchMap[a.note]+(a.acc==='#'?1:a.acc==='b'?-1:0))-(b.octave*12+pitchMap[b.note]+(b.acc==='#'?1:b.acc==='b'?-1:0)));
+            
+            let noteHeadPositions = [];
+            let lastY = -999;
+            sortedNotes.forEach((n, index) => {
+                let refPitch = clef === 'treble' ? trebleRefPitch : bassRefPitch;
+                let refY = staffY + 2 * staffSpacing;
+                let currentPitch = getAbsPitch(n);
+                let pitchDiff = currentPitch - refPitch;
+                let y = refY - pitchDiff * (staffSpacing / 2);
+                
+                let x = startX + sigWidth;
+                if (isArpeggio) { x += index * noteSpacing; } 
+                else if (index > 0 && Math.abs(y - lastY) < staffSpacing) { x = noteHeadPositions[noteHeadPositions.length - 1].x + (staffSpacing * 1.3); }
+                noteHeadPositions.push({ x, y, note: n });
+                lastY = y;
+            });
+
+            noteHeadPositions.forEach(pos => {
+                svg += `<ellipse cx="${pos.x}" cy="${pos.y}" rx="${staffSpacing * 0.7}" ry="${staffSpacing * 0.5}" fill="#1f2937"/>`;
+                if (pos.note.acc && (!signature || !signature.notes.includes(pos.note.note))) {
+                    svg += `<text x="${pos.x - (staffSpacing * 1.8)}" y="${pos.y + (staffSpacing * 0.5)}" font-size="${staffSpacing * 2}" font-family="serif" class="svg-text">${pos.note.acc === '#' ? '♯' : '♭'}</text>`;
+                }
+                // Ledger lines
+                for (let i = staffY + 5 * staffSpacing; i <= pos.y; i += staffSpacing) {
+                     if (i > staffY + 4 * staffSpacing) svg += `<line x1="${pos.x-staffSpacing}" y1="${i}" x2="${pos.x+staffSpacing}" y2="${i}" class="svg-line" stroke-width="1.5"/>`;
+                }
+                for (let i = staffY - staffSpacing; i >= pos.y; i -= staffSpacing) {
+                     if (i < staffY) svg += `<line x1="${pos.x-staffSpacing}" y1="${i}" x2="${pos.x+staffSpacing}" y2="${i}" class="svg-line" stroke-width="1.5"/>`;
+                }
+            });
+            container.innerHTML = svg + `</svg>`;
+        }
+        
+        // --- Notes App UI Logic ---
+        function initNotesApp() {
+            const appPrefix = 'notes-';
+            const card = document.getElementById(appPrefix + 'card');
+            const statusMessage = document.getElementById(appPrefix + 'status-message');
+            const correctBtn = document.getElementById(appPrefix + 'correct-btn');
+            const incorrectBtn = document.getElementById(appPrefix + 'incorrect-btn');
+            const feedbackButtons = document.getElementById(appPrefix + 'feedback-buttons');
+            const noteNameEl = document.getElementById(appPrefix + 'name');
+            const pianoContainer = document.getElementById(appPrefix + 'piano-container');
+            const notationContainer = document.getElementById(appPrefix + 'notation-container');
+            const animationContainer = document.getElementById(appPrefix + 'animation-container');
+            const progressBarContainer = document.getElementById(appPrefix + 'progress-bar-container');
+            const progressBar = document.getElementById(appPrefix + 'progress-bar');
+            const progressText = document.getElementById(appPrefix + 'progress-text');
+            const detailedProgressModal = document.getElementById(appPrefix + 'detailed-progress-modal');
+            const closeDetailsModalBtn = document.getElementById(appPrefix + 'close-details-modal-btn');
+            const detailedProgressList = document.getElementById(appPrefix + 'detailed-progress-list');
+            const playSoundBtn = document.getElementById(appPrefix + 'play-sound-btn');
+            
+            const selectNotesBtn = document.getElementById(appPrefix + 'select-notes-btn');
+            const noteSelectorModal = document.getElementById(appPrefix + 'selector-modal');
+            const closeSelectorModalBtn = document.getElementById(appPrefix + 'close-selector-modal-btn');
+            const noteListContainer = document.getElementById(appPrefix + 'list-container');
+            const selectAllNotesBtn = document.getElementById(appPrefix + 'select-all-btn');
+            const deselectAllNotesBtn = document.getElementById(appPrefix + 'deselect-all-btn');
+            const saveNoteSelectionBtn = document.getElementById(appPrefix + 'save-selection-btn');
+            const modalClefFilters = document.getElementById(appPrefix + 'modal-clef-filters');
+
+            const srsIntervals = NOTES_DATA.srsIntervals;
+            const allNotes = NOTES_DATA.notes;
+            let userProgress = {};
+            let currentNote = null;
+            let currentClefFilter = ['treble'];
+            let selectedNoteIds = allNotes.map(n => n.id);
+            let cardStartTime = 0;
+            let midiTriggeredFlip = false;
+            let isWaitingForMidiContinue = false;
+            let lastMidiResultWasCorrect = false;
+            let midiContinueTimeout = null;
+
+             const instance = {
+                prefix: appPrefix,
+                isCardFlipped: () => card.classList.contains('is-flipped'),
+                isReadyForMidi: () => !!currentNote,
+                getCurrentItem: () => currentNote,
+                flipCard,
+                checkMidiAnswer,
+                displayNextCard,
+                isWaitingForNext: () => isWaitingForMidiContinue,
+                handleMidiContinue: () => {
+                    if (!isWaitingForMidiContinue) return;
+                    if (midiContinueTimeout) clearTimeout(midiContinueTimeout);
+                    isWaitingForMidiContinue = false;
+                    handleFeedback(lastMidiResultWasCorrect);
+                }
+            };
+
+            function getActiveNotes() {
+                return allNotes.filter(note => currentClefFilter.includes(note.clef) && selectedNoteIds.includes(note.id));
+            }
+            function updateProgressDisplay() {
+                const activeNotes = getActiveNotes();
+                const maxLevel = srsIntervals.length;
+                if (activeNotes.length === 0) {
+                    progressBar.style.width = '0%';
+                    progressText.textContent = 'No Notes';
+                    return;
+                }
+                
+                const totalPossibleLevels = activeNotes.length * maxLevel;
+                const currentAchievedLevels = activeNotes.reduce((sum, note) => {
+                    return sum + (userProgress[note.id]?.level || 0);
+                }, 0);
+                
+                const percentage = totalPossibleLevels > 0 ? Math.round((currentAchievedLevels / totalPossibleLevels) * 100) : 0;
+                
+                progressBar.style.width = `${percentage}%`;
+                progressText.textContent = `${percentage}% Mastered`;
+            }
+            function triggerCelebration() {
+                const el = document.createElement('div');
+                el.className = 'celebration'; el.textContent = '🎉';
+                animationContainer.appendChild(el);
+                setTimeout(() => el.remove(), 2000);
+            }
+            function updateNoteProgress(wasCorrect) {
+                if (!currentNote) return;
+                const progress = userProgress[currentNote.id] || { level: 0, times: [] };
+                const oldLevel = progress.level;
+                if (wasCorrect) {
+                    progress.level = Math.min(progress.level + 1, srsIntervals.length);
+                    if (oldLevel < srsIntervals.length && progress.level === srsIntervals.length) {
+                        triggerCelebration();
+                    }
+                } else {
+                    progress.level = 0;
+                }
+                userProgress[currentNote.id] = progress;
+            }
+            function generatePiano() {
+                pianoContainer.innerHTML = '<div class="piano"></div>';
+                const piano = pianoContainer.querySelector('.piano');
+                let pianoKeysHtml = '';
+                const keyMap = [
+                    {keys: [1,3,5,6,8,10,12,13,15,17,18,20,22,24], class: 'white-key'},
+                    {keys: [2,4,7,9,11,14,16,19,21,23], class: 'black-key'}
+                ];
+                keyMap.forEach(type => {
+                     type.keys.forEach(k => {
+                        pianoKeysHtml += `<div class="key ${type.class}" data-key="${k}"></div>`;
+                     });
+                });
+                 piano.innerHTML = pianoKeysHtml;
+            }
+            function displayNextCard() {
+                if (midiContinueTimeout) clearTimeout(midiContinueTimeout);
+                card.classList.remove('card-fly-away', 'answered-correct', 'answered-incorrect');
+                document.querySelectorAll('#simulated-keyboard .key.played').forEach(k => k.classList.remove('played'));
+                isWaitingForMidiContinue = false;
+                statusMessage.textContent = MIDI.isReady ? 'Play the note you see.' : 'Click card to flip.';
+                midiTriggeredFlip = false;
+                MIDI.playedKeysSinceFlip.clear();
+
+                const active = getActiveNotes();
+                const unlearnedPool = active.filter(n => (userProgress[n.id]?.level || 0) < srsIntervals.length);
+
+                if (unlearnedPool.length === 0 && active.length > 0) {
+                    notationContainer.innerHTML = `<div class="text-center text-green-600 p-4"><h3 class="text-2xl font-bold">Congratulations!</h3><p class="mt-2">You've mastered all notes in this set. Change filters to practice more.</p></div>`;
+                    noteNameEl.textContent = "Set Complete!";
+                    currentNote = null;
+                } else if (active.length === 0) {
+                     notationContainer.innerHTML = '<p class="text-center text-gray-500">No notes match filter.</p>';
+                    noteNameEl.textContent = "No Notes"; 
+                    currentNote = null;
+                } else {
+                    currentNote = unlearnedPool[Math.floor(Math.random() * unlearnedPool.length)];
+                }
+
+                cardStartTime = Date.now(); 
+                feedbackButtons.classList.add('opacity-0', 'invisible');
+                
+                card.style.transition = 'none'; 
+                card.classList.remove('is-flipped');
+                void card.offsetHeight; 
+                card.style.transition = ''; 
+
+                if (currentNote) {
+                    const notationOptions = { clef: currentNote.clef, width: 280, height: 150, staffY: 60, staffSpacing: 12, startX: 85 };
+                    drawNotationSVG(notationContainer, [currentNote.notation], notationOptions);
+                    noteNameEl.textContent = currentNote.name;
+                    generatePiano();
+                }
+                updateProgressDisplay();
+            }
+            
+            function handleFeedback(wasCorrect) {
+                if (!currentNote) return;
+                updateNoteProgress(wasCorrect);
+
+                card.classList.add('card-fly-away', wasCorrect ? 'answered-correct' : 'answered-incorrect');
+                
+                const animationHandler = () => {
+                    card.removeEventListener('animationend', animationHandler);
+                    card.classList.remove('card-fly-away', 'answered-correct', 'answered-incorrect');
+                    displayNextCard(); 
+                };
+                card.addEventListener('animationend', animationHandler);
+            }
+            
+            function flipCard({isMidiTriggered = false} = {}) {
+                if (!currentNote) return;
+                const wasFlipped = card.classList.contains('is-flipped');
+                card.classList.toggle('is-flipped');
+                
+                if (!wasFlipped) {
+                     const progress = userProgress[currentNote.id] || { level: 0, times: [] };
+                    progress.times.push(Date.now() - cardStartTime);
+                    userProgress[currentNote.id] = progress;
+                    Audio.playNotes(currentNote.keys);
+                    
+                    if (isMidiTriggered) {
+                         midiTriggeredFlip = true;
+                        feedbackButtons.classList.add('opacity-0', 'invisible');
+                    } else {
+                        const keyEl = pianoContainer.querySelector(`.key[data-key="${currentNote.key}"]`);
+                        if (keyEl) keyEl.classList.add('highlighted');
+                        feedbackButtons.classList.remove('opacity-0', 'invisible');
+                    }
+                }
+            }
+
+            function checkMidiAnswer(playedKeys) {
+                 if (!currentNote || !midiTriggeredFlip) return;
+                
+                const correctKey = currentNote.key;
+                const playedKey = playedKeys[0]; // Only check the first played note
+
+                pianoContainer.querySelectorAll('.key').forEach(k => {
+                    k.className = k.className.includes('black') ? 'key black-key' : 'key white-key';
+                    k.style.backgroundColor = '';
+                });
+
+                let isCorrect = playedKey === correctKey;
+                lastMidiResultWasCorrect = isCorrect;
+
+                const correctKeyEl = pianoContainer.querySelector(`.key[data-key="${correctKey}"]`);
+                if (isCorrect) {
+                    if (correctKeyEl) correctKeyEl.classList.add('correct');
+                } else {
+                    if (correctKeyEl) correctKeyEl.classList.add('highlighted'); // Show correct answer
+                    const playedKeyEl = pianoContainer.querySelector(`.key[data-key="${playedKey}"]`);
+                    if (playedKeyEl) playedKeyEl.classList.add('incorrect');
+                }
+                
+                isWaitingForMidiContinue = true;
+                statusMessage.textContent = 'Press any key to continue...';
+                if (midiContinueTimeout) clearTimeout(midiContinueTimeout);
+                midiContinueTimeout = setTimeout(() => instance.handleMidiContinue(), 5000);
+            }
+            
+            function handleFilterChange() { displayNextCard(); }
+
+            function populateDetailedProgress() {
+                detailedProgressList.innerHTML = '';
+                const active = getActiveNotes();
+                if(active.length === 0) { detailedProgressList.innerHTML = '<p>No notes selected.</p>'; return; }
+                 const frag = document.createDocumentFragment();
+                 active.sort((a,b) => a.key - b.key).forEach(note => {
+                    const p = userProgress[note.id] || {level: 0, times: []};
+                    const avg = p.times.length ? `${(p.times.reduce((a,b)=>a+b,0)/p.times.length/1000).toFixed(2)}s` : 'N/A';
+                    const item = document.createElement('div');
+                    item.className = 'flex justify-between items-center py-2 border-b modal-border last:border-b-0 text-sm';
+                    item.innerHTML = `<span class="w-1/2 truncate pr-2">${note.name}</span><div class="text-right flex-shrink-0"><span class="font-semibold block ${p.level === srsIntervals.length ? 'text-green-600' : 'text-blue-600'}">Level ${p.level}/${srsIntervals.length}</span><span class="text-xs text-gray-500">Avg: ${avg}</span></div>`;
+                    frag.appendChild(item);
+                 });
+                 detailedProgressList.appendChild(frag);
+            }
+
+            function populateNoteSelector() {
+                modalClefFilters.querySelector(`[data-type="${currentClefFilter[0]}"]`).click();
+                updateNoteList();
+            }
+
+            function updateNoteList() {
+                const notesInClef = allNotes.filter(n => n.clef === currentClefFilter[0]);
+                noteListContainer.innerHTML = '';
+                notesInClef.forEach(note => {
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-100';
+                    label.innerHTML = `<input type="checkbox" data-note-id="${note.id}" class="form-checkbox rounded text-indigo-500" ${selectedNoteIds.includes(note.id)?'checked':''}><span class="text-sm">${note.name}</span>`;
+                    noteListContainer.appendChild(label);
+                });
+            }
+
+            function handleModalClefFilterClick(e) {
+                const button = e.target.closest('.clef-filter-btn'); if (!button) return;
+                currentClefFilter = [button.dataset.type];
+                modalClefFilters.querySelectorAll('.clef-filter-btn').forEach(btn => {
+                    if (currentClefFilter.includes(btn.dataset.type)) { btn.classList.add('bg-teal-500', 'text-white'); btn.classList.remove('bg-gray-200'); } 
+                    else { btn.classList.add('bg-gray-200'); btn.classList.remove('bg-teal-500', 'text-white'); }
+                });
+                updateNoteList();
+            }
+            
+            card.addEventListener('click', () => flipCard());
+            playSoundBtn.addEventListener('click', (e) => { e.stopPropagation(); if (currentNote) Audio.playNotes(currentNote.keys); });
+            correctBtn.addEventListener('click', () => handleFeedback(true));
+            incorrectBtn.addEventListener('click', () => handleFeedback(false));
+            progressBarContainer.addEventListener('click', () => { detailedProgressModal.classList.remove('hidden'); populateDetailedProgress(); });
+            closeDetailsModalBtn.addEventListener('click', () => detailedProgressModal.classList.add('hidden'));
+            
+            selectNotesBtn.addEventListener('click', () => { noteSelectorModal.classList.remove('hidden'); populateNoteSelector(); });
+            closeSelectorModalBtn.addEventListener('click', () => noteSelectorModal.classList.add('hidden'));
+            modalClefFilters.addEventListener('click', handleModalClefFilterClick);
+            selectAllNotesBtn.addEventListener('click', () => noteListContainer.querySelectorAll('input').forEach(c => c.checked = true));
+            deselectAllNotesBtn.addEventListener('click', () => noteListContainer.querySelectorAll('input').forEach(c => c.checked = false));
+            saveNoteSelectionBtn.addEventListener('click', () => {
+                 const selectedInCurrentClef = Array.from(noteListContainer.querySelectorAll('input:checked')).map(i => i.dataset.noteId);
+                 const otherClefId = currentClefFilter[0] === 'treble' ? 'bass' : 'treble';
+                 const otherClefNotes = selectedNoteIds.filter(id => allNotes.find(n => n.id === id)?.clef === otherClefId);
+                 selectedNoteIds = [...otherClefNotes, ...selectedInCurrentClef];
+                 noteSelectorModal.classList.add('hidden'); 
+                 handleFilterChange();
+            });
+
+            generatePiano();
+            displayNextCard();
+
+            return instance;
+        }
+
+        // --- Chords App UI Logic ---
+        function initChordsApp() {
+            const appPrefix = 'chords-';
+            const card = document.getElementById(appPrefix + 'card');
+            const statusMessage = document.getElementById(appPrefix + 'status-message');
+            const correctBtn = document.getElementById(appPrefix + 'correct-btn');
+            const incorrectBtn = document.getElementById(appPrefix + 'incorrect-btn');
+            const feedbackButtons = document.getElementById(appPrefix + 'feedback-buttons');
+            const chordNameEl = document.getElementById(appPrefix + 'name');
+            const pianoContainer = document.getElementById(appPrefix + 'piano-container');
+            const miniNotationContainer = document.getElementById(appPrefix + 'mini-notation-container');
+            const notationContainer = document.getElementById(appPrefix + 'notation-container');
+            const animationContainer = document.getElementById(appPrefix + 'animation-container');
+            const progressBarContainer = document.getElementById(appPrefix + 'progress-bar-container');
+            const progressBar = document.getElementById(appPrefix + 'progress-bar');
+            const progressText = document.getElementById(appPrefix + 'progress-text');
+            const detailedProgressModal = document.getElementById(appPrefix + 'detailed-progress-modal');
+            const closeDetailsModalBtn = document.getElementById(appPrefix + 'close-details-modal-btn');
+            const detailedProgressList = document.getElementById(appPrefix + 'detailed-progress-list');
+            const selectChordsBtn = document.getElementById(appPrefix + 'select-chords-btn');
+            const chordSelectorModal = document.getElementById(appPrefix + 'selector-modal');
+            const closeSelectorModalBtn = document.getElementById(appPrefix + 'close-selector-modal-btn');
+            const chordListContainer = document.getElementById(appPrefix + 'list-container');
+            const selectAllChordsBtn = document.getElementById(appPrefix + 'select-all-btn');
+            const deselectAllChordsBtn = document.getElementById(appPrefix + 'deselect-all-btn');
+            const saveChordSelectionBtn = document.getElementById(appPrefix + 'save-selection-btn');
+            const playSoundBtn = document.getElementById(appPrefix + 'play-sound-btn');
+            const modalTypeFilters = document.getElementById('chords-modal-type-filters');
+            const modalInversionFilters = document.getElementById('chords-modal-inversion-filters');
+            const arpeggioToggle = document.getElementById('chords-arpeggio-toggle');
+            const keySigToggle = document.getElementById('chords-key-sig-toggle');
+
+            const srsIntervals = CHORDS_DATA.srsIntervals;
+            const allChords = generateAllChords(CHORDS_DATA.baseChords);
+            const uniqueChordRootNames = [...new Set(CHORDS_DATA.baseChords.map(c => c.name.split(' ')[0]))].sort();
+            let userProgress = {};
+            let currentChord = null;
+            let currentTypeFilter = ['major'];
+            let currentInversionFilter = ['root', '1st', '2nd'];
+            let selectedChordRoots = [...uniqueChordRootNames];
+            let keySignatureMode = false;
+            let arpeggioMode = false;
+            let cardStartTime = 0;
+            let midiTriggeredFlip = false;
+            let isWaitingForMidiContinue = false;
+            let lastMidiResultWasCorrect = false;
+            let midiContinueTimeout = null;
+
+            const instance = {
+                prefix: appPrefix,
+                isCardFlipped: () => card.classList.contains('is-flipped'),
+                isReadyForMidi: () => !!currentChord,
+                getCurrentItem: () => currentChord,
+                flipCard,
+                checkMidiAnswer,
+                displayNextCard,
+                isWaitingForNext: () => isWaitingForMidiContinue,
+                handleMidiContinue: () => {
+                    if (!isWaitingForMidiContinue) return;
+                    if (midiContinueTimeout) clearTimeout(midiContinueTimeout);
+                    isWaitingForMidiContinue = false;
+                    handleFeedback(lastMidiResultWasCorrect);
+                }
+            };
+
+            function getActiveChords() {
+                return allChords.filter(chord => {
+                    const rootName = chord.baseName.split(' ')[0];
+                    return selectedChordRoots.includes(rootName) &&
+                           currentTypeFilter.includes(chord.type) &&
+                           currentInversionFilter.includes(chord.inversionType);
+                });
+            }
+            function updateProgressDisplay() {
+                const activeChords = getActiveChords();
+                const maxLevel = srsIntervals.length;
+                if (activeChords.length === 0) {
+                     progressBar.style.width = '0%';
+                     progressText.textContent = 'No Chords';
+                     return;
+                }
+                const totalPossibleLevels = activeChords.length * maxLevel;
+                const currentAchievedLevels = activeChords.reduce((sum, chord) => sum + (userProgress[chord.id]?.level || 0), 0);
+                const percentage = totalPossibleLevels > 0 ? Math.round((currentAchievedLevels / totalPossibleLevels) * 100) : 0;
+
+                progressBar.style.width = `${percentage}%`;
+                progressText.textContent = `${percentage}% Mastered`;
+            }
+            function triggerCelebration(count = 1) {
+                for (let i = 0; i < count; i++) {
+                    const el = document.createElement('div');
+                    el.className = 'celebration'; el.textContent = '🎉';
+                    el.style.setProperty('--random-x', `${(Math.random() - 0.5) * 150}px`);
+                    el.style.setProperty('--random-y', `${(Math.random() - 0.5) * 150}px`);
+                    el.style.animationDelay = `${Math.random() * 0.4}s`;
+                    animationContainer.appendChild(el);
+                    setTimeout(() => el.remove(), 2000);
+                }
+            }
+            function updateChordProgress(wasCorrect) {
+                if (!currentChord) return;
+                const progress = userProgress[currentChord.id] || { level: 0, times: [] };
+                const oldLevel = progress.level;
+                if (wasCorrect) {
+                    progress.level = Math.min(progress.level + 1, srsIntervals.length);
+                    if (oldLevel < srsIntervals.length && progress.level === srsIntervals.length) {
+                        const avgTime = progress.times.length ? progress.times.reduce((a, b) => a + b, 0) / progress.times.length : 9999;
+                        triggerCelebration(avgTime < 2000 ? 5 : avgTime < 4000 ? 3 : 1);
+                    }
+                } else { progress.level = 0; }
+                userProgress[currentChord.id] = progress;
+            }
+            function generatePiano() {
+                pianoContainer.innerHTML = '<div class="piano"></div>';
+                const piano = pianoContainer.querySelector('.piano');
+                [1, 3, 5, 6, 8, 10, 12, 13, 15, 17, 18, 20, 22, 24].forEach(k => piano.innerHTML += `<div class="key white-key" data-key="${k}"></div>`);
+                [2, 4, 7, 9, 11, 14, 16, 19, 21, 23].forEach(k => piano.innerHTML += `<div class="key black-key" data-key="${k}"></div>`);
+            }
+            function displayNextCard(isRerender = false) {
+                if (midiContinueTimeout) clearTimeout(midiContinueTimeout);
+                card.classList.remove('card-fly-away', 'answered-correct', 'answered-incorrect');
+                document.querySelectorAll('#simulated-keyboard .key.played').forEach(k => k.classList.remove('played'));
+                 if(isRerender) {
+                    // Simple re-render without animations
+                    if (!currentChord) return;
+                    const sig = keySignatureMode ? CHORDS_DATA.KEY_SIGNATURES[currentChord.baseName] : null;
+                    const largeNotationOptions = { signature: sig, clef: 'treble', isArpeggio: arpeggioMode, width: 280, height: 150, staffY: 60, staffSpacing: 12, startX: 85 };
+                    drawNotationSVG(notationContainer, currentChord.notation, largeNotationOptions);
+                    return;
+                }
+                
+                isWaitingForMidiContinue = false;
+                statusMessage.textContent = MIDI.isReady ? 'Play the notes you see.' : 'Click card to flip.';
+                midiTriggeredFlip = false;
+                MIDI.playedKeysSinceFlip.clear();
+                
+                const active = getActiveChords();
+                const unlearnedPool = active.filter(c => (userProgress[c.id]?.level || 0) < srsIntervals.length);
+
+                if (unlearnedPool.length === 0 && active.length > 0) {
+                    notationContainer.innerHTML = `<div class="text-center text-green-600 p-4"><h3 class="text-2xl font-bold">Congratulations!</h3><p class="mt-2">You've mastered all chords in this set. Change filters to practice more.</p></div>`;
+                    chordNameEl.textContent = "Set Complete!";
+                    currentChord = null;
+                } else if (active.length === 0) {
+                    notationContainer.innerHTML = '<p class="text-center text-gray-500">No chords match selection.</p>';
+                    chordNameEl.textContent = "No Chords"; 
+                    currentChord = null; 
+                } else {
+                    currentChord = unlearnedPool[Math.floor(Math.random() * unlearnedPool.length)];
+                }
+
+                cardStartTime = Date.now(); 
+                feedbackButtons.classList.add('opacity-0', 'invisible');
+                miniNotationContainer.innerHTML = '';
+                
+                // Reset card state and render new content
+                card.style.transition = 'none'; 
+                card.classList.remove('is-flipped');
+                void card.offsetHeight; 
+                card.style.transition = ''; 
+
+                if (currentChord) {
+                     const sig = keySignatureMode ? CHORDS_DATA.KEY_SIGNATURES[currentChord.baseName] : null;
+                    const largeNotationOptions = { signature: sig, clef: 'treble', isArpeggio: arpeggioMode, width: 280, height: 150, staffY: 60, staffSpacing: 12, startX: 85 };
+                    drawNotationSVG(notationContainer, currentChord.notation, largeNotationOptions);
+                    chordNameEl.textContent = currentChord.name;
+                    generatePiano(); // Redraw clean piano
+                }
+                updateProgressDisplay();
+            }
+
+            function handleFeedback(wasCorrect) {
+                if (!currentChord) return;
+                updateChordProgress(wasCorrect);
+
+                card.classList.add('card-fly-away', wasCorrect ? 'answered-correct' : 'answered-incorrect');
+                card.addEventListener('animationend', () => {
+                    card.classList.remove('card-fly-away', 'answered-correct', 'answered-incorrect');
+                    displayNextCard(); 
+                }, { once: true });
+            }
+            
+            function flipCard({isMidiTriggered = false} = {}) {
+                if (!currentChord) return;
+
+                const wasFlipped = card.classList.contains('is-flipped');
+                card.classList.toggle('is-flipped');
+
+                if (!wasFlipped) {
+                    const progress = userProgress[currentChord.id] || { level: 0, times: [] };
+                    progress.times.push(Date.now() - cardStartTime);
+                    userProgress[currentChord.id] = progress;
+                    Audio.playNotes(currentChord.keys, arpeggioMode);
+                    
+                    const sig = keySignatureMode ? CHORDS_DATA.KEY_SIGNATURES[currentChord.baseName] : null;
+                    const miniNotationOptions = { signature: sig, clef: 'treble', isArpeggio: arpeggioMode, width: 200, height: 100, staffY: 40, staffSpacing: 8, startX: 60 };
+                    drawNotationSVG(miniNotationContainer, currentChord.notation, miniNotationOptions);
+
+                    if (isMidiTriggered) {
+                        midiTriggeredFlip = true;
+                        feedbackButtons.classList.add('opacity-0', 'invisible');
+                    } else {
+                        currentChord.keys.forEach(key => {
+                            const keyEl = pianoContainer.querySelector(`.key[data-key="${key}"]`);
+                            if (keyEl) keyEl.classList.add('highlighted');
+                        });
+                        feedbackButtons.classList.remove('opacity-0', 'invisible');
+                    }
+                }
+            }
+            
+            function checkMidiAnswer(playedKeys) {
+                if (!currentChord || !midiTriggeredFlip) return;
+                
+                const correctKeys = currentChord.keys;
+                const playedSet = new Set(playedKeys);
+                const correctSet = new Set(correctKeys);
+
+                pianoContainer.querySelectorAll('.key').forEach(k => {
+                    k.className = k.className.includes('black') ? 'key black-key' : 'key white-key';
+                    k.style.backgroundColor = '';
+                });
+                
+                let allCorrect = true;
+                
+                correctKeys.forEach(key => {
+                    const keyEl = pianoContainer.querySelector(`.key[data-key="${key}"]`);
+                    if (!keyEl) return;
+                    if (playedSet.has(key)) { keyEl.classList.add('correct'); } 
+                    else { keyEl.classList.add('highlighted'); allCorrect = false; }
+                });
+
+                playedKeys.forEach(key => {
+                    if (!correctSet.has(key)) {
+                        const keyEl = pianoContainer.querySelector(`.key[data-key="${key}"]`);
+                        if (keyEl) keyEl.classList.add('incorrect');
+                        allCorrect = false;
+                    }
+                });
+
+                if (playedKeys.length !== correctKeys.length) allCorrect = false;
+                
+                lastMidiResultWasCorrect = allCorrect;
+                isWaitingForMidiContinue = true;
+                statusMessage.textContent = 'Press any key to continue...';
+                if (midiContinueTimeout) clearTimeout(midiContinueTimeout);
+                midiContinueTimeout = setTimeout(() => instance.handleMidiContinue(), 5000);
+            }
+
+            function handleFilterChange() { displayNextCard(); }
+            
+            function populateDetailedProgress() {
+                detailedProgressList.innerHTML = '';
+                const active = getActiveChords();
+                if (active.length === 0) { detailedProgressList.innerHTML = '<p class="p-4 text-center text-gray-500">No chords.</p>'; return; }
+                const frag = document.createDocumentFragment();
+                active.sort((a,b) => a.name.localeCompare(b.name)).forEach(c => {
+                    const p = userProgress[c.id] || { level: 0, times: [] };
+                    const avg = p.times.length ? `${(p.times.reduce((a, b) => a + b, 0) / p.times.length / 1000).toFixed(2)}s` : 'N/A';
+                    const item = document.createElement('div');
+                    item.className = 'flex justify-between items-center py-2 border-b modal-border last:border-b-0 text-sm';
+                    item.innerHTML = `<span class="w-1/2 truncate pr-2">${c.name}</span><div class="text-right flex-shrink-0"><span class="font-semibold block ${p.level === srsIntervals.length ? 'text-green-600' : 'text-blue-600'}">Level ${p.level}/${srsIntervals.length}</span><span class="text-xs text-gray-500">Avg: ${avg}</span></div>`;
+                    frag.appendChild(item);
+                });
+                detailedProgressList.appendChild(frag);
+            }
+            function populateChordSelector() {
+                // Populate Modal Filters
+                modalTypeFilters.innerHTML = `
+                    <button data-type="major" class="filter-btn type-filter-btn text-sm py-1 px-3 rounded-full shadow btn-press">Major</button>
+                    <button data-type="minor" class="filter-btn type-filter-btn text-sm py-1 px-3 rounded-full shadow btn-press">Minor</button>`;
+                
+                modalInversionFilters.innerHTML = `
+                     <button data-inversion="root" class="filter-btn inversion-filter-btn text-sm py-1 px-3 rounded-full shadow btn-press">Root</button>
+                     <button data-inversion="1st" class="filter-btn inversion-filter-btn text-sm py-1 px-3 rounded-full shadow btn-press">1st Inv</button>
+                     <button data-inversion="2nd" class="filter-btn inversion-filter-btn text-sm py-1 px-3 rounded-full shadow btn-press">2nd Inv</button>`;
+                
+                arpeggioToggle.checked = arpeggioMode;
+                keySigToggle.checked = keySignatureMode;
+
+                chordListContainer.innerHTML = '';
+                uniqueChordRootNames.forEach(root => {
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-100';
+                    label.innerHTML = `<input type="checkbox" data-chord-name="${root}" class="form-checkbox rounded text-indigo-500" ${selectedChordRoots.includes(root)?'checked':''}><span class="text-sm">${root}</span>`;
+                    chordListContainer.appendChild(label);
+                });
+                
+                updateModalFilterButtons();
+            }
+
+             function handleModalTypeFilterClick(e) {
+                const button = e.target.closest('.type-filter-btn'); if (!button) return;
+                const type = button.dataset.type; const isActive = currentTypeFilter.includes(type);
+                if (isActive) { if (currentTypeFilter.length > 1) currentTypeFilter = currentTypeFilter.filter(t => t !== type); } else { currentTypeFilter.push(type); }
+                updateModalFilterButtons();
+            }
+            function handleModalInversionFilterClick(e) {
+                const button = e.target.closest('.inversion-filter-btn'); if (!button) return;
+                const inv = button.dataset.inversion; const isActive = currentInversionFilter.includes(inv);
+                if (isActive) { if (currentInversionFilter.length > 1) currentInversionFilter = currentInversionFilter.filter(i => i !== inv); } else { currentInversionFilter.push(inv); }
+                updateModalFilterButtons();
+            }
+            function updateModalFilterButtons() {
+                modalTypeFilters.querySelectorAll('.type-filter-btn').forEach(btn => {
+                    if (currentTypeFilter.includes(btn.dataset.type)) { btn.classList.add('bg-blue-500', 'text-white'); btn.classList.remove('bg-gray-200'); } 
+                    else { btn.classList.add('bg-gray-200'); btn.classList.remove('bg-blue-500', 'text-white'); }
+                });
+                 modalInversionFilters.querySelectorAll('.inversion-filter-btn').forEach(btn => {
+                    if (currentInversionFilter.includes(btn.dataset.inversion)) { btn.classList.add('bg-blue-500', 'text-white'); btn.classList.remove('bg-gray-200'); } 
+                    else { btn.classList.add('bg-gray-200'); btn.classList.remove('bg-blue-500', 'text-white'); }
+                });
+            }
+
+            card.addEventListener('click', () => flipCard());
+            playSoundBtn.addEventListener('click', (e) => { e.stopPropagation(); if(currentChord) Audio.playNotes(currentChord.keys, arpeggioMode); });
+            correctBtn.addEventListener('click', () => handleFeedback(true));
+            incorrectBtn.addEventListener('click', () => handleFeedback(false));
+            progressBarContainer.addEventListener('click', () => { detailedProgressModal.classList.remove('hidden'); populateDetailedProgress(); });
+            closeDetailsModalBtn.addEventListener('click', () => detailedProgressModal.classList.add('hidden'));
+            selectChordsBtn.addEventListener('click', () => { populateChordSelector(); chordSelectorModal.classList.remove('hidden'); });
+            closeSelectorModalBtn.addEventListener('click', () => chordSelectorModal.classList.add('hidden'));
+            selectAllChordsBtn.addEventListener('click', () => chordListContainer.querySelectorAll('input').forEach(c => c.checked = true));
+            deselectAllChordsBtn.addEventListener('click', () => chordListContainer.querySelectorAll('input').forEach(c => c.checked = false));
+            modalTypeFilters.addEventListener('click', handleModalTypeFilterClick);
+            modalInversionFilters.addEventListener('click', handleModalInversionFilterClick);
+            saveChordSelectionBtn.addEventListener('click', () => {
+                selectedChordRoots = Array.from(chordListContainer.querySelectorAll('input:checked')).map(i => i.dataset.chordName);
+                keySignatureMode = document.getElementById('chords-key-sig-toggle').checked;
+                arpeggioMode = arpeggioToggle.checked;
+                chordSelectorModal.classList.add('hidden'); handleFilterChange();
+            });
+            generatePiano(); displayNextCard();
+            
+            return instance;
+        }
+
+        // --- Scales App UI Logic ---
+        function initScalesApp() {
+            const appPrefix = 'scales-';
+            const card = document.getElementById(appPrefix + 'card');
+            const statusMessage = document.getElementById(appPrefix + 'status-message');
+            const correctBtn = document.getElementById(appPrefix + 'correct-btn');
+            const incorrectBtn = document.getElementById(appPrefix + 'incorrect-btn');
+            const feedbackButtons = document.getElementById(appPrefix + 'feedback-buttons');
+            const scaleNameEl = document.getElementById(appPrefix + 'name');
+            const pianoContainer = document.getElementById(appPrefix + 'piano-container');
+            const miniNotationContainer = document.getElementById(appPrefix + 'mini-notation-container');
+            const pianoRangeEl = document.getElementById(appPrefix + 'piano-range');
+            const notationContainer = document.getElementById(appPrefix + 'notation-container');
+            const animationContainer = document.getElementById(appPrefix + 'animation-container');
+            const progressBarContainer = document.getElementById(appPrefix + 'progress-bar-container');
+            const progressBar = document.getElementById(appPrefix + 'progress-bar');
+            const progressText = document.getElementById(appPrefix + 'progress-text');
+            const detailedProgressModal = document.getElementById(appPrefix + 'detailed-progress-modal');
+            const closeDetailsModalBtn = document.getElementById(appPrefix + 'close-details-modal-btn');
+            const detailedProgressList = document.getElementById(appPrefix + 'detailed-progress-list');
+            const selectScalesBtn = document.getElementById(appPrefix + 'select-scales-btn');
+            const scaleSelectorModal = document.getElementById(appPrefix + 'selector-modal');
+            const closeSelectorModalBtn = document.getElementById(appPrefix + 'close-selector-modal-btn');
+            const scaleListContainer = document.getElementById(appPrefix + 'list-container');
+            const selectAllScalesBtn = document.getElementById(appPrefix + 'select-all-btn');
+            const deselectAllScalesBtn = document.getElementById(appPrefix + 'deselect-all-btn');
+            const saveScaleSelectionBtn = document.getElementById(appPrefix + 'save-selection-btn');
+            const playSoundBtn = document.getElementById(appPrefix + 'play-sound-btn');
+            const modalTypeFilters = document.getElementById('scales-modal-type-filters');
+            const keySigToggle = document.getElementById('scales-key-sig-toggle');
+
+            const srsIntervals = CHORDS_DATA.srsIntervals;
+            const allScales = parseAllScales(SCALES_DATA.baseScales);
+            const uniqueScaleRootNames = [...new Set(allScales.map(s => s.name.split(' ')[0]))].sort();
+            let userProgress = {};
+            let currentScale = null;
+            let currentTypeFilter = ['major'];
+            let selectedScaleRoots = [...uniqueScaleRootNames];
+            let keySignatureMode = false;
+            let cardStartTime = 0;
+            let midiTriggeredFlip = false;
+            let isWaitingForMidiContinue = false;
+            let lastMidiResultWasCorrect = false;
+            let midiContinueTimeout = null;
+            
+            const instance = {
+                prefix: appPrefix,
+                isCardFlipped: () => card.classList.contains('is-flipped'),
+                isReadyForMidi: () => !!currentScale,
+                getCurrentItem: () => currentScale,
+                flipCard,
+                checkMidiAnswer,
+                displayNextCard,
+                isWaitingForNext: () => isWaitingForMidiContinue,
+                handleMidiContinue: () => {
+                    if (!isWaitingForMidiContinue) return;
+                    if (midiContinueTimeout) clearTimeout(midiContinueTimeout);
+                    isWaitingForMidiContinue = false;
+                    handleFeedback(lastMidiResultWasCorrect);
+                }
+            };
+
+            function getActiveScales() { return allScales.filter(s => selectedScaleRoots.includes(s.name.split(' ')[0]) && currentTypeFilter.includes(s.type)); }
+            function updateProgressDisplay() {
+                const active = getActiveScales();
+                const maxLevel = srsIntervals.length;
+                if (active.length === 0) {
+                    progressBar.style.width = '0%';
+                    progressText.textContent = 'No Scales';
+                    return;
+                }
+                const totalPossibleLevels = active.length * maxLevel;
+                const currentAchievedLevels = active.reduce((sum, scale) => sum + (userProgress[scale.id]?.level || 0), 0);
+                const percentage = totalPossibleLevels > 0 ? Math.round((currentAchievedLevels / totalPossibleLevels) * 100) : 0;
+                
+                progressBar.style.width = `${percentage}%`;
+                progressText.textContent = `${percentage}% Mastered`;
+            }
+            function triggerCelebration(count = 1) {
+                for (let i = 0; i < count; i++) {
+                    const el = document.createElement('div');
+                    el.className = 'celebration'; el.textContent = '🎉';
+                    el.style.setProperty('--random-x', `${(Math.random() - 0.5) * 150}px`);
+                    el.style.setProperty('--random-y', `${(Math.random() - 0.5) * 150}px`);
+                    el.style.animationDelay = `${Math.random() * 0.4}s`;
+                    animationContainer.appendChild(el);
+                    setTimeout(() => el.remove(), 2000);
+                }
+            }
+            function updateScaleProgress(wasCorrect) {
+                if (!currentScale) return;
+                const progress = userProgress[currentScale.id] || { level: 0, times: [] };
+                const oldLevel = progress.level;
+                if (wasCorrect) {
+                    progress.level = Math.min(progress.level + 1, srsIntervals.length);
+                    if (oldLevel < srsIntervals.length && progress.level === srsIntervals.length) {
+                        const avgTime = progress.times.length ? progress.times.reduce((a, b) => a + b, 0) / progress.times.length : 9999;
+                        triggerCelebration(avgTime < 4000 ? 5 : avgTime < 7000 ? 3 : 1);
+                    }
+                } else { progress.level = 0; }
+                userProgress[currentScale.id] = progress;
+            }
+            function generatePiano() {
+                pianoContainer.innerHTML = '<div class="piano"></div>';
+                const piano = pianoContainer.querySelector('.piano');
+                [1, 3, 5, 6, 8, 10, 12, 13, 15, 17, 18, 20, 22, 24].forEach(k=>piano.innerHTML += `<div class="key white-key" data-key="${k}"></div>`);
+                [2, 4, 7, 9, 11, 14, 16, 19, 21, 23].forEach(k=>piano.innerHTML += `<div class="key black-key" data-key="${k}"></div>`);
+            }
+            function displayNextCard(isRerender = false) {
+                if (midiContinueTimeout) clearTimeout(midiContinueTimeout);
+                card.classList.remove('card-fly-away', 'answered-correct', 'answered-incorrect');
+                 document.querySelectorAll('#simulated-keyboard .key.played').forEach(k => k.classList.remove('played'));
+                if(isRerender) {
+                    // Simple re-render logic
+                    if (!currentScale) return;
+                    const sig = keySignatureMode ? currentScale.keySignature : null;
+                    const largeNotationOptions = { signature: sig, clef: 'treble', isArpeggio: true, width: 400, height: 150, staffY: 60, staffSpacing: 12, noteSpacing: 30, startX: 30 };
+                    drawNotationSVG(notationContainer, currentScale.notation, largeNotationOptions);
+                    return;
+                }
+
+                isWaitingForMidiContinue = false;
+                statusMessage.textContent = MIDI.isReady ? 'Play the notes you see.' : 'Click card to flip.';
+                midiTriggeredFlip = false;
+                MIDI.playedKeysSinceFlip.clear();
+                
+                const active = getActiveScales();
+                const unlearnedPool = active.filter(s => (userProgress[s.id]?.level || 0) < srsIntervals.length);
+                
+                if (unlearnedPool.length === 0 && active.length > 0) {
+                    notationContainer.innerHTML = `<div class="text-center text-green-600 p-4"><h3 class="text-2xl font-bold">Congratulations!</h3><p class="mt-2">You've mastered all scales in this set. Change filters to practice more.</p></div>`;
+                    scaleNameEl.textContent = "Set Complete!";
+                    currentScale = null;
+                } else if (active.length === 0) {
+                    notationContainer.innerHTML = '<p class="text-center text-gray-500">No scales match filter.</p>';
+                    scaleNameEl.textContent = "No Scales"; 
+                    currentScale = null;
+                } else {
+                        currentScale = unlearnedPool[Math.floor(Math.random() * unlearnedPool.length)];
+                }
+                
+                cardStartTime = Date.now();
+                feedbackButtons.classList.add('opacity-0', 'invisible');
+                miniNotationContainer.innerHTML = '';
+                
+                // Reset card state and render
+                card.style.transition = 'none';
+                card.classList.remove('is-flipped');
+                void card.offsetHeight;
+                card.style.transition = '';
+
+                if (currentScale) {
+                    const sig = keySignatureMode ? currentScale.keySignature : null;
+                    const largeNotationOptions = { signature: sig, clef: 'treble', isArpeggio: true, width: 400, height: 150, staffY: 60, staffSpacing: 12, noteSpacing: 30, startX: 30 };
+                    drawNotationSVG(notationContainer, currentScale.notation, largeNotationOptions);
+
+                    scaleNameEl.textContent = currentScale.name;
+                    const first = currentScale.notation[0], last = currentScale.notation[currentScale.notation.length - 1];
+                    pianoRangeEl.textContent = `${first.note}${first.acc||''}${first.octave} to ${last.note}${last.acc||''}${last.octave}`;
+                    generatePiano();
+                }
+                updateProgressDisplay();
+            }
+            function handleFeedback(wasCorrect) {
+                if (!currentScale) return;
+                updateScaleProgress(wasCorrect);
+
+                card.classList.add('card-fly-away', wasCorrect ? 'answered-correct' : 'answered-incorrect');
+                card.addEventListener('animationend', () => {
+                    card.classList.remove('card-fly-away', 'answered-correct', 'answered-incorrect');
+                    displayNextCard();
+                }, { once: true });
+            }
+            function flipCard({isMidiTriggered = false} = {}) {
+                if (!currentScale) return;
+                
+                const wasFlipped = card.classList.contains('is-flipped');
+                card.classList.toggle('is-flipped');
+
+                if (!wasFlipped) {
+                    const progress = userProgress[currentScale.id] || { level: 0, times: [] };
+                    progress.times.push(Date.now() - cardStartTime);
+                    userProgress[currentScale.id] = progress;
+                    Audio.playNotes(currentScale.keys, true);
+                    
+                    const sig = keySignatureMode ? currentScale.keySignature : null;
+                    const miniNotationOptions = { signature: sig, clef: 'treble', isArpeggio: true, width: 320, height: 100, staffY: 40, staffSpacing: 8, noteSpacing: 25, startX: 20 };
+                    drawNotationSVG(miniNotationContainer, currentScale.notation, miniNotationOptions);
+
+                    if (isMidiTriggered) {
+                        midiTriggeredFlip = true;
+                        feedbackButtons.classList.add('opacity-0', 'invisible');
+                    } else {
+                         currentScale.keys.forEach(key => {
+                            const keyEl = pianoContainer.querySelector(`.key[data-key="${key}"]`);
+                            if (keyEl) keyEl.classList.add('highlighted');
+                        });
+                        feedbackButtons.classList.remove('opacity-0', 'invisible');
+                    }
+                }
+            }
+            
+            function handleModalTypeFilterClick(e) {
+                const button = e.target.closest('.type-filter-btn'); if (!button) return;
+                const type = button.dataset.type; const isActive = currentTypeFilter.includes(type);
+                if (isActive) { if (currentTypeFilter.length > 1) currentTypeFilter = currentTypeFilter.filter(t => t !== type); } else { currentTypeFilter.push(type); }
+                updateModalTypeFilterButtons();
+            }
+            function updateModalTypeFilterButtons() {
+                modalTypeFilters.querySelectorAll('.type-filter-btn').forEach(btn => {
+                    if (currentTypeFilter.includes(btn.dataset.type)) { btn.classList.add('bg-blue-500', 'text-white'); btn.classList.remove('bg-gray-200'); } 
+                    else { btn.classList.add('bg-gray-200'); btn.classList.remove('bg-blue-500', 'text-white'); }
+                });
+            }
+            function checkMidiAnswer(playedKeys) {
+                if (!currentScale || !midiTriggeredFlip) return;
+                
+                const correctKeys = currentScale.keys;
+                const playedSet = new Set(playedKeys);
+                const correctSet = new Set(correctKeys);
+
+                pianoContainer.querySelectorAll('.key').forEach(k => {
+                    k.className = k.className.includes('black') ? 'key black-key' : 'key white-key';
+                    k.style.backgroundColor = '';
+                });
+
+                let allCorrect = true;
+                
+                correctKeys.forEach(key => {
+                    const keyEl = pianoContainer.querySelector(`.key[data-key="${key}"]`);
+                    if (!keyEl) return;
+                    if (playedSet.has(key)) { keyEl.classList.add('correct'); } 
+                    else { keyEl.classList.add('highlighted'); allCorrect = false; }
+                });
+
+                playedKeys.forEach(key => {
+                    if (!correctSet.has(key)) {
+                        const keyEl = pianoContainer.querySelector(`.key[data-key="${key}"]`);
+                        if (keyEl) keyEl.classList.add('incorrect');
+                        allCorrect = false;
+                    }
+                });
+                 
+                if (playedKeys.length !== correctKeys.length) allCorrect = false;
+                
+                lastMidiResultWasCorrect = allCorrect;
+                isWaitingForMidiContinue = true;
+                statusMessage.textContent = 'Press any key to continue...';
+                if (midiContinueTimeout) clearTimeout(midiContinueTimeout);
+                midiContinueTimeout = setTimeout(() => instance.handleMidiContinue(), 5000);
+            }
+            
+            function populateDetailedProgress() {
+                detailedProgressList.innerHTML = '';
+                const active = getActiveScales();
+                if (active.length === 0) { detailedProgressList.innerHTML = '<p class="p-4 text-center text-gray-500">No scales.</p>'; return; }
+                const frag = document.createDocumentFragment();
+                active.sort((a,b) => a.name.localeCompare(b.name)).forEach(scale => {
+                    const p = userProgress[scale.id] || { level: 0, times: [] };
+                    const avg = p.times.length ? `${(p.times.reduce((a, b) => a + b, 0) / p.times.length / 1000).toFixed(2)}s` : 'N/A';
+                    const item = document.createElement('div');
+                    item.className = 'flex justify-between items-center py-2 border-b modal-border last:border-b-0 text-sm';
+                    item.innerHTML = `<span class="w-1/2 truncate pr-2">${scale.name}</span><div class="text-right"><span class="font-semibold block ${p.level === srsIntervals.length ? 'text-green-600' : 'text-blue-600'}">Level ${p.level}/${srsIntervals.length}</span><span class="text-xs text-gray-500">Avg: ${avg}</span></div>`;
+                    frag.appendChild(item);
+                });
+                detailedProgressList.appendChild(frag);
+            }
+            function populateScaleSelector() {
+                 modalTypeFilters.innerHTML = `
+                    <button data-type="major" class="filter-btn type-filter-btn text-sm py-1 px-3 rounded-full shadow btn-press">Major</button>
+                    <button data-type="naturalMinor" class="filter-btn type-filter-btn text-sm py-1 px-3 rounded-full shadow btn-press">Natural Minor</button>
+                    <button data-type="harmonicMinor" class="filter-btn type-filter-btn text-sm py-1 px-3 rounded-full shadow btn-press">Harmonic Minor</button>
+                    <button data-type="melodicMinor" class="filter-btn type-filter-btn text-sm py-1 px-3 rounded-full shadow btn-press">Melodic Minor</button>
+                 `;
+                 keySigToggle.checked = keySignatureMode;
+                scaleListContainer.innerHTML = '';
+                uniqueScaleRootNames.forEach(root => {
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-100';
+                    label.innerHTML = `<input type="checkbox" data-scale-name="${root}" class="form-checkbox rounded text-indigo-500" ${selectedScaleRoots.includes(root)?'checked':''}><span class="text-sm">${root}</span>`;
+                    scaleListContainer.appendChild(label);
+                });
+                updateModalTypeFilterButtons();
+            }
+
+            card.addEventListener('click', () => flipCard());
+            
+            playSoundBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if(currentScale) Audio.playNotes(currentScale.keys, true);
+            });
+
+            correctBtn.addEventListener('click', () => handleFeedback(true));
+            incorrectBtn.addEventListener('click', () => handleFeedback(false));
+            progressBarContainer.addEventListener('click', () => { detailedProgressModal.classList.remove('hidden'); populateDetailedProgress(); });
+            closeDetailsModalBtn.addEventListener('click', () => detailedProgressModal.classList.add('hidden'));
+            selectScalesBtn.addEventListener('click', () => { populateScaleSelector(); scaleSelectorModal.classList.remove('hidden'); });
+            closeSelectorModalBtn.addEventListener('click', () => scaleSelectorModal.classList.add('hidden'));
+            selectAllScalesBtn.addEventListener('click', () => scaleListContainer.querySelectorAll('input').forEach(c => c.checked = true));
+            deselectAllScalesBtn.addEventListener('click', () => scaleListContainer.querySelectorAll('input').forEach(c => c.checked = false));
+            modalTypeFilters.addEventListener('click', handleModalTypeFilterClick);
+            saveScaleSelectionBtn.addEventListener('click', () => {
+                selectedScaleRoots = Array.from(scaleListContainer.querySelectorAll('input:checked')).map(i => i.dataset.scaleName);
+                keySignatureMode = document.getElementById('scales-key-sig-toggle').checked;
+                scaleSelectorModal.classList.add('hidden'); displayNextCard();
+            });
+            displayNextCard();
+            
+            return instance;
+        }
+        
+        document.addEventListener('click', () => Audio.start(), { once: true });
+        
+        // --- MIDI Simulation / Draggable Keyboard Logic ---
+        function generateSimulatedKeyboard() {
+            const keyboard = document.getElementById('simulated-keyboard');
+            if (!keyboard) return;
+            keyboard.innerHTML = '';
+
+            const whiteKeyNumbers = [-14, -12, -11, -9, -7, -6, -4, -2, 0, 1, 3, 5, 6, 8, 10, 12, 13, 15, 17, 18, 20, 22, 24];
+            const blackKeyNumbers = [-13, -10, -8, -5, -3, -1, 2, 4, 7, 9, 11, 14, 16, 19, 21, 23];
+            
+            const whiteKeyWidth = 100 / whiteKeyNumbers.length;
+            let html = '';
+
+            // Generate white keys
+            whiteKeyNumbers.forEach((k, index) => {
+                const c4Text = k === 1 ? 'C4' : '';
+                html += `<div class="key white-key btn-press" data-key="${k}" style="left:${index * whiteKeyWidth}%; width: ${whiteKeyWidth}%;">${c4Text}</div>`;
+            });
+
+            // Generate black keys, positioned relative to white keys
+            blackKeyNumbers.forEach(k => {
+                const precedingWhiteKeyIndex = whiteKeyNumbers.findIndex(wk => wk === k - 1);
+                if (precedingWhiteKeyIndex !== -1) {
+                    const leftPos = (precedingWhiteKeyIndex + 1.13) * whiteKeyWidth;
+                    html += `<div class="key black-key btn-press" data-key="${k}" style="left: ${leftPos}%; width: ${whiteKeyWidth * 0.7}%"></div>`;
+                }
+            });
+
+            keyboard.innerHTML = html;
+            
+            keyboard.querySelectorAll('.key').forEach(key => {
+                key.addEventListener('mousedown', (e) => handleSimulatedMidi(e.currentTarget, true));
+                key.addEventListener('mouseup', (e) => handleSimulatedMidi(e.currentTarget, false));
+                key.addEventListener('mouseleave', (e) => {
+                    if (e.buttons === 1) handleSimulatedMidi(e.currentTarget, false);
+                });
+            });
+        }
+        function handleSimulatedMidi(keyElement, isNoteOn) {
+            if (MIDI.isReady) return; 
+            const keyNumber = parseInt(keyElement.dataset.key);
+            
+            if (isNoteOn) {
+                keyElement.classList.add('played');
+                Audio.playNotes([keyNumber]);
+            }
+            
+            const note = keyNumber + 59;
+            const command = isNoteOn ? 144 : 128; 
+            const velocity = isNoteOn ? 100 : 0;
+            const fakeMidiEvent = { data: [command, note, velocity] };
+            MIDI.onMIDIMessage(fakeMidiEvent);
+        }
+        
+        // Draggable Keyboard Logic
+        const keyboardContainer = document.getElementById('simulated-keyboard-container');
+        const dragHandle = document.getElementById('keyboard-drag-handle');
+        let isDragging = false;
+        let startX, startY, initialX, initialY;
+
+        dragHandle.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            const rect = keyboardContainer.getBoundingClientRect();
+            
+            keyboardContainer.style.transform = 'none';
+            keyboardContainer.style.bottom = 'auto';
+            keyboardContainer.style.top = `${rect.top}px`;
+            keyboardContainer.style.left = `${rect.left}px`;
+            
+            initialX = keyboardContainer.offsetLeft;
+            initialY = keyboardContainer.offsetTop;
+            
+            dragHandle.style.cursor = 'grabbing';
+            document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                keyboardContainer.style.left = `${initialX + dx}px`;
+                keyboardContainer.style.top = `${initialY + dy}px`;
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                dragHandle.style.cursor = 'grab';
+                document.body.style.userSelect = '';
+            }
+        });
+
+        generateSimulatedKeyboard();
+
+    </script>
+</body>
+</html>
